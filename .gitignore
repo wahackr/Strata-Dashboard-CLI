@@ -1,0 +1,4 @@
+node_modules/
+strata.json
+# The widget clone kept alongside as the reference for the ported logic.
+Strata-Dashboard/

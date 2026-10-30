@@ -1,0 +1,22 @@
+{
+  "name": "strata-cli",
+  "version": "1.0.0",
+  "description": "Terminal monitor for one or more Strata inference servers.",
+  "homepage": "https://github.com/wahackr/Strata-Dashboard-CLI",
+  "author": {
+    "name": "Wahackr",
+    "email": "wahbigbig@gmail.com"
+  },
+  "main": "strata-cli/app.js",
+  "bin": {
+    "strata": "bin/strata.js"
+  },
+  "scripts": {
+    "start": "node bin/strata.js",
+    "check": "node --check bin/strata.js && node --check strata-cli/app.js && node --check strata-cli/client.js && node --check strata-cli/config.js && node --check strata-cli/derive.js && node --check strata-cli/format.js && node --check strata-cli/mascot.js && node --check strata-cli/render.js",
+    "test": "node test/config.js && node test/client.js && node test/render.js"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

@@ -1,0 +1,22 @@
+{
+  "refreshMs": 1000,
+  "timeoutMs": 4000,
+  "theme": "dark",
+  "compact": false,
+  "mascot": true,
+  "servers": [
+    {
+      "name": "Home",
+      "url": "http://127.0.0.1:8080",
+      "apiKeyEnv": "STRATA_HOME_KEY",
+      "refreshMs": 1000
+    },
+    {
+      "name": "Office",
+      "url": "http://192.168.1.20:8080",
+      "apiKey": "paste-a-key-here-or-use-apiKeyEnv",
+      "refreshMs": 2000,
+      "timeoutMs": 6000
+    }
+  ]
+}
