@@ -44,7 +44,8 @@ assert.ok(reading.detail.includes(`${f.kfmt(4000)} / ${f.kfmt(8000)} tokens`), "
 // Failure paths, mirroring renderer.js renderFailure().
 assert.equal(derive({ ok: false, status: 401, error: "401 unauthorized" }).label, "API key needed");
 assert.equal(derive({ ok: false, status: 0, error: "connect ECONNREFUSED" }).label, "Server not reachable");
-assert.equal(derive({ ok: false, status: 0 }).detail, "connect ECONNREFUSED");
+assert.equal(derive({ ok: false, status: 0, error: "connect ECONNREFUSED" }).detail,
+  "connect ECONNREFUSED", "transport error is shown as the failure detail");
 assert.equal(derive(null).label, "Connecting…", "no poll yet is not an error");
 const empty = derive(ok({ live: { state: "idle" }, hardware: {}, hardware_static: {}, engine: {}, history: {}, requests: [] }));
 assert.equal(empty.gpu, null, "missing hardware renders as a dash, not a crash");
@@ -93,12 +94,27 @@ const compact = render({ entries, width, height: 40, theme: "dark", color: false
 assert.equal(compact.length, entries.length + 2, "compact strip is one line per server");
 for (const line of compact) assert.ok(f.width(line) <= width, `compact line fits: ${JSON.stringify(line)}`);
 
+// Regression: switching to compact crashed on a generating server because
+// derive() returns speed as a number and pad() counts cells on a string.
+const busy = [{
+  server: servers[0], focused: true,
+  payload: ok({ live: { state: "generating", tok_s: 41.200000000000004, generated: 12, max_tokens: 200 },
+    engine: { max_context: 131072 }, history: { tok_s: [1, 2, 3] } }),
+}];
+const busyStrip = render({ entries: busy, width, height: 40, theme: "dark", color: false, compact: true, tick: 0 });
+// The speed sits in a 5-cell column, so pad() leaves trailing blanks before "t/s".
+assert.ok(busyStrip.some((l) => /41\.2\s+t\/s/.test(l)), "compact strip renders the decode speed");
+assert.ok(!busyStrip.join("\n").includes("41.200000000000004"), "float noise is rounded away");
+const busyPanel = render({ entries: busy, width, height: 40, theme: "dark", color: false, tick: 0 });
+assert.ok(busyPanel.some((l) => /Speed\s+41\.2/.test(l)), "expanded panel rounds the decode speed");
+
 // Too tall for the screen: the panels collapse to strips instead of scrolling.
 const tall = render({ entries, width, height: 12, theme: "dark", color: false, tick: 0 });
 assert.equal(tall.length, entries.length + 2, "auto-compact when the panels would overflow");
 
-// Color on must not change the geometry.
-const colored = render({ entries, width, height: 40, theme: "light", color: true, tick: 2 });
+// Color on must not change the geometry. Same theme on both sides: the header
+// prints the theme name, so "light" is a cell wider than "dark" by design.
+const colored = render({ entries, width, height: 40, theme: "dark", color: true, tick: 2 });
 assert.equal(colored.length, lines.length, "color does not add or remove lines");
 for (let i = 0; i < colored.length; i++) {
   assert.equal(f.width(colored[i]), f.width(lines[i]), `line ${i} keeps its width with color on`);

@@ -68,7 +68,9 @@ function panel(entry, { iw, pal, color, tick, mascotOn }) {
     lines.push(`│ ${head} ${f.pad(f.truncate(side[i], inner), inner)} │`);
   }
 
-  const speedVal = d.speed == null ? null : `${d.speed}`;
+  // fmt(), not a template literal: tok_s arrives with float noise that would
+  // otherwise print as "41.200000000000004".
+  const speedVal = d.speed == null ? null : f.fmt(d.speed, 1);
   lines.push(metricRow(
     metricCell("Speed", speedVal, "t/s", d.history.tok_s, undefined, pal, color),
     metricCell("GPU", d.gpu, "%", d.history.gpu_util, 100, pal, color),
@@ -108,7 +110,9 @@ function stripLine(entry, { iw, pal, color, tick, mascotOn }) {
   const d = derive(payload);
   const role = f.STATE_ROLE[d.state] || "muted";
   const face = mascotOn ? f.paint(mascot.inline(d.state), pal[role], color) : "  ";
-  const speed = d.speed == null ? "–" : d.speed;
+  // derive() hands speed over as a number, and pad() counts cells on a string:
+  // format it here or a generating server crashes the whole draw.
+  const speed = d.speed == null ? "–" : f.fmt(d.speed, 1);
   const gpu = d.gpu == null ? "–" : d.gpu;
   const ctx = d.ctxMax ? `${Math.round(d.ctxFrac * 100)}%` : "–";
   const sp = f.paint(f.spark(d.history.tok_s, { cells: 12 }), pal.accent, color);
