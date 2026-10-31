@@ -93,6 +93,19 @@ const compact = render({ entries, width, height: 40, theme: "dark", color: false
 assert.equal(compact.length, entries.length + 2, "compact strip is one line per server");
 for (const line of compact) assert.ok(f.width(line) <= width, `compact line fits: ${JSON.stringify(line)}`);
 
+// Regression: switching to compact crashed on a generating server because
+// derive() returns speed as a number and pad() counts cells on a string.
+const busy = [{
+  server: servers[0], focused: true,
+  payload: ok({ live: { state: "generating", tok_s: 41.200000000000004, generated: 12, max_tokens: 200 },
+    engine: { max_context: 131072 }, history: { tok_s: [1, 2, 3] } }),
+}];
+const busyStrip = render({ entries: busy, width, height: 40, theme: "dark", color: false, compact: true, tick: 0 });
+assert.ok(busyStrip.some((l) => l.includes("41.2 t/s")), "compact strip renders the decode speed");
+assert.ok(!busyStrip.join("\n").includes("41.200000000000004"), "float noise is rounded away");
+const busyPanel = render({ entries: busy, width, height: 40, theme: "dark", color: false, tick: 0 });
+assert.ok(busyPanel.some((l) => l.includes("Speed 41.2")), "expanded panel rounds the decode speed");
+
 // Too tall for the screen: the panels collapse to strips instead of scrolling.
 const tall = render({ entries, width, height: 12, theme: "dark", color: false, tick: 0 });
 assert.equal(tall.length, entries.length + 2, "auto-compact when the panels would overflow");
