@@ -48,7 +48,8 @@ const multi = write("multi.json", JSON.stringify({
 const env2 = { ...env0, OFFICE_KEY: "office-key" };
 const cfg = load({ configPath: multi, env: env2, cwd: dir });
 assert.equal(cfg.servers.length, 3, "one entry per configured server");
-assert.deepEqual(cfg.servers.map((s) => s.name), ["Home", "Strata 2", "Strata 3"], "unnamed servers get numbered labels");
+assert.deepEqual(cfg.servers.map((s) => s.name), ["Home", "Office", "Strata 3"],
+  "explicit names are kept, unnamed servers fall back to a numbered label");
 assert.equal(cfg.servers[1].url, "https://office.lan:8443", "trailing slash trimmed, scheme kept");
 assert.equal(cfg.servers[2].url, "http://192.168.1.9:8080", "scheme added when absent");
 assert.equal(cfg.servers[1].apiKey, "office-key", "environment key beats the stale file key");

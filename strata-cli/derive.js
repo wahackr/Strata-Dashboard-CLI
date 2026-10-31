@@ -20,8 +20,11 @@ const EMPTY = {
 
 function derive(payload) {
   const d = { ...EMPTY, history: {} };
-  if (!payload || !payload.ok) {
-    const is401 = payload?.status === 401;
+  // No payload at all means the first poll has not come back yet, which is the
+  // Connecting… idle state — not a failure. Only a polled { ok: false } is one.
+  if (!payload) return d;
+  if (!payload.ok) {
+    const is401 = payload.status === 401;
     return {
       ...d, state: "error",
       label: is401 ? "API key needed" : "Server not reachable",
