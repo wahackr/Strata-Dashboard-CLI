@@ -3,6 +3,7 @@
 const { load, normalizeUrl, ConfigError } = require("../strata-cli/config.js");
 const { poll, stateOf } = require("../strata-cli/client.js");
 const { render } = require("../strata-cli/render.js");
+const { colorMode, COLOR_MODES } = require("../strata-cli/format.js");
 
 const USAGE = `strata — live monitor for Strata inference servers
 
@@ -20,6 +21,7 @@ Options
   --theme <dark|light> color theme (default: from config, else dark)
   --compact            one line per server, like the widget's compact strip
   --no-mascot          draw the panels without the animated blob
+  --color [mode]       auto|16|256|truecolor|never; force a palette depth
   --no-color           plain text, no ANSI
   --once               poll each server once, print, and exit
   --json               with --once, print raw payloads instead of the panel
@@ -27,6 +29,12 @@ Options
 
 Keys
   q quit · space refresh now · c compact · d theme · m mascot · 1-9 focus · ↑/↓ select
+
+Color
+  Auto paints 24-bit when COLORTERM says truecolor, 256-color names when TERM
+  says 256color, and the 8 ANSI names otherwise, so the accent stays green on
+  plain terminals (Alpine's tty, TERM=linux) instead of quantizing to yellow.
+  Pipes are plain unless FORCE_COLOR is set; NO_COLOR turns color off.
 
 Config file (JSON)
   {
@@ -42,9 +50,14 @@ Config file (JSON)
 
 function parseArgs(argv) {
   const opts = { servers: [], color: undefined, mascot: undefined, compact: undefined };
+  // i is the index of the value itself: callers advance with `++i`. Reading
+  // argv[i + 1] here takes the argument of the *next* flag and silently skips
+  // the real one, so `--server http://x:1 --once` watched "http://--once".
+  // A value that looks like a flag is a missing value, not a server named
+  // "--once".
   const take = (i, name) => {
-    const v = argv[i + 1];
-    if (v === undefined) throw new ConfigError(`${name} needs a value`);
+    const v = argv[i];
+    if (v === undefined || v.startsWith("--")) throw new ConfigError(`${name} needs a value`);
     return v;
   };
   const duration = (v, name) => {
@@ -74,8 +87,12 @@ function parseArgs(argv) {
     else if (a === "--mascot") opts.mascot = true;
     else if (a === "--no-mascot") opts.mascot = false;
     else if (a === "--no-color") opts.color = false;
-    else if (a === "--color") opts.color = true;
-    else if (a === "--once") opts.once = true;
+    else if (a === "--color") {
+      // The mode is optional, so consume it only when it is one:
+      // `--color --compact` must not eat the next flag.
+      const v = argv[i + 1];
+      if (COLOR_MODES.includes(v)) { opts.color = v; i += 1; } else opts.color = true;
+    } else if (a === "--once") opts.once = true;
     else if (a === "--json") opts.json = true;
     else throw new ConfigError(`unknown option ${a}`);
   }
@@ -115,9 +132,10 @@ async function runOnce(cfg, opts) {
   const lines = render({
     entries, width: process.stdout.columns || 80, height: process.stdout.rows || 24,
     theme: opts.theme || cfg.theme,
-    // Same rule as app.js: color only when the terminal asks for it, so piping
-    // the snapshot into another program yields plain text.
-    color: opts.color === undefined ? Boolean(process.stdout.isTTY) && !process.env.NO_COLOR : opts.color,
+    // Same rule as app.js: a mode string resolved from the flag plus the
+    // environment, so a pipe yields plain text and a plain terminal gets
+    // ANSI names rather than 24-bit codes it cannot render.
+    color: colorMode(opts.color, process.env, Boolean(process.stdout.isTTY)),
     compact: opts.compact ?? cfg.compact, mascot: opts.mascot ?? cfg.mascot,
     tick: 0, configSource: cfg.source, refreshMs: cfg.servers[0].refreshMs, warnings: cfg.warnings,
   });
@@ -136,7 +154,14 @@ async function main() {
     if (!process.stdout.isTTY && !opts.once) console.error("strata: not a terminal, printing one snapshot");
     process.exit(await runOnce(cfg, opts));
   }
-  require("../strata-cli/app.js").start({ ...opts, theme: opts.theme });
+  // Hand over the config we already resolved. start() otherwise re-reads the
+  // config file, which would ignore --server entirely.
+  require("../strata-cli/app.js").start({ ...opts, theme: opts.theme, config: cfg });
 }
 
-main().catch((e) => { console.error(`strata: ${e.message}`); process.exit(1); });
+// Guarded so the tests can require the flag parser without running the CLI.
+if (require.main === module) {
+  main().catch((e) => { console.error(`strata: ${e.message}`); process.exit(1); });
+}
+
+module.exports = { parseArgs, cliConfig, USAGE };
