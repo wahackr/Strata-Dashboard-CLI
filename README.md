@@ -88,11 +88,25 @@ as one server, matching the widget's migration of old `settings.json` files.
 | `--theme <dark\|light>` | theme |
 | `--compact` | one line per server, like the widget's compact strip |
 | `--no-mascot` / `--no-color` | drop the blob / drop ANSI |
+| `--color [auto\|16\|256\|truecolor\|never]` | force a palette depth |
 | `--once` | poll each server once, print, exit |
 | `--json` | with `--once`, raw payloads for piping |
 
 Keys in the live view: `q` quit · `space` refresh now · `c` compact · `d` theme ·
 `m` mascot · `1-9` focus a server · `↑`/`↓` select.
+
+**Color.** Auto paints 24-bit when `COLORTERM` says `truecolor`, 256-color names
+when `TERM` says `256color`, and the 8 ANSI names otherwise. The last case
+matters: quantizing the lime accent `#b8f36b` to the nearest 256-color slot
+lands on yellow, so on a plain terminal (Alpine's tty, `TERM=linux`) the accent
+is the bright-green ANSI name instead. `NO_COLOR` turns color off and
+`FORCE_COLOR` turns it on for pipes; an explicit `--color` beats both.
+
+**Redrawing.** Each frame homes the cursor, rewrites every line, and erases
+whatever is left below the last one, so toggling `c` for compact mode or
+shrinking the terminal never leaves rows of the previous frame behind. The
+screen is cleared once on entry, not per frame, so the widget doesn't flicker
+while the mascot animates.
 
 ## What it reuses from the widget
 

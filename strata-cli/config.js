@@ -78,8 +78,8 @@ function defaultConfigPath(env = process.env, cwd = process.cwd()) {
 }
 
 function parse(rawText, { env = process.env, source = "config", warnings = [] }) {
-  const doc = JSON.parse(rawText);
-  if (Array.isArray(doc)) doc = { servers: doc };
+  const raw = JSON.parse(rawText);
+  const doc = Array.isArray(raw) ? { servers: raw } : raw;
   if (typeof doc !== "object" || doc === null) throw new ConfigError("config must be an object or a server list");
 
   // A flat object is a single-server config; the widget migrates those the

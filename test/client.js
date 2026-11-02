@@ -18,6 +18,13 @@ const routes = (map) => async (url, opts) => {
 
 const METRICS = { live: { state: "generating", queued: 0, tok_s: 41.2 }, engine: { max_context: 131072 }, requests: [] };
 
+// A stuck promise drains the event loop and node exits 0, so an unfinished
+// await would look like a pass. Fail loudly instead.
+const watchdog = setTimeout(() => {
+  console.error("client tests stalled: a fetch gate was never released");
+  process.exit(1);
+}, 5000);
+
 (async () => {
   // ---- URL joining and auth header, same as the widget's request() ----
   seen.length = 0;
@@ -73,45 +80,61 @@ const METRICS = { live: { state: "generating", queued: 0, tok_s: 41.2 }, engine:
 
   // A failed metrics call short-circuits; health is never requested.
   seen.length = 0;
-  const failed = await poll(server, { fetchImpl: async () => response(503, {}) });
+  const unavailable = async (url, opts) => {
+    seen.push({ url, headers: opts.headers });
+    return response(503, {});
+  };
+  const failed = await poll(server, { fetchImpl: unavailable });
   assert.equal(failed.ok, false);
   assert.equal(failed.error, "HTTP 503");
   assert.deepEqual(seen.map((s) => s.url), ["http://127.0.0.1:8080/metrics"], "no health request after a failed metrics call");
 
   // ---- Poller: one in-flight poll at a time ----
+  // A tick is two fetches: /metrics, then /health. Hold only the first metrics
+  // call so the stuck poll is observable without parking the event loop.
   let calls = 0;
   let release;
-  const gate = () => new Promise((resolve) => { release = resolve; calls += 1; });
+  let holdNext = true;
   const poller = new Poller({ ...server, apiKey: "" }, {
-    fetchImpl: async () => { await gate(); return response(200, METRICS); },
+    fetchImpl: async () => {
+      calls += 1;
+      if (holdNext) {
+        holdNext = false;
+        return new Promise((resolve) => { release = resolve; });
+      }
+      return response(200, METRICS);
+    },
     onPoll: (p) => { poller.payload = p; },
   });
   const first = poller.tick();
   const second = await poller.tick();
   assert.equal(second, null, "a tick while one is in flight is skipped, not queued");
-  assert.equal(calls, 1, "the slow server was asked once");
+  assert.equal(calls, 1, "the blocked metrics call is the only fetch so far");
   release(response(200, METRICS));
   const done = await first;
   assert.equal(done.ok, true);
   assert.equal(poller.payload.ok, true, "onPoll saw the payload");
-  assert.equal(calls, 1, "no extra fetch while the first was still running");
+  assert.equal(calls, 2, "the poll was metrics + health; the skipped tick fetched nothing");
 
   // After it settles, the next tick goes through.
   await poller.tick();
-  assert.equal(calls, 2, "the guard clears once the poll finishes");
+  assert.equal(calls, 4, "the guard clears once the poll finishes");
   poller.stop();
 
   // start()/stop() leave no timer behind and poll immediately.
   let ticks = 0;
+  const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
   const live = new Poller({ ...server, refreshMs: 100000 }, {
     fetchImpl: async () => { ticks += 1; return response(200, METRICS); },
   });
   live.start();
-  assert.equal(ticks, 1, "start() polls at once instead of waiting a full interval");
+  await settle();
+  assert.equal(ticks, 2, "start() polls at once (metrics + health) instead of waiting a full interval");
   live.stop();
   live.start();
+  await settle();
   live.stop();
-  assert.equal(ticks, 2, "restart does not stack timers");
+  assert.equal(ticks, 4, "restart does not stack timers");
 
   console.log("url joining, bearer auth, failure shapes, health fallback and no-overlap polling OK");
-})().catch((e) => { console.error(e.message); process.exit(1); });
+})().catch((e) => { console.error(e.message); process.exit(1); }).finally(() => clearTimeout(watchdog));
