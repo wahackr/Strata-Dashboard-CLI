@@ -19,6 +19,40 @@ const STATE_ROLE = {
   idle: "muted", reading: "accent", generating: "good", queued: "warn", error: "bad",
 };
 
+// Named ANSI colors per role, for terminals that cannot render 24-bit. The
+// index is chosen by meaning, never by distance: PALETTES.dark.accent is lime
+// (#b8f36b), whose nearest 16-color neighbour is yellow, so quantizing the hex
+// is exactly what makes the accent read yellow on plain terminals (Alpine's
+// tty, TERM=linux, tmux without `colours=truecolor`). Green is the promise.
+const ANSI_BY_ROLE = {
+  dark: {
+    text: { ansi: 97, x256: 15 }, muted: { ansi: 90, x256: 8 },
+    accent: { ansi: 92, x256: 10 }, good: { ansi: 92, x256: 10 },
+    warn: { ansi: 93, x256: 11 }, bad: { ansi: 91, x256: 9 },
+    border: { ansi: 90, x256: 8 }, card: { ansi: 97, x256: 15 },
+  },
+  light: {
+    text: { ansi: 30, x256: 0 }, muted: { ansi: 90, x256: 7 },
+    accent: { ansi: 32, x256: 2 }, good: { ansi: 32, x256: 2 },
+    warn: { ansi: 33, x256: 3 }, bad: { ansi: 31, x256: 1 },
+    border: { ansi: 90, x256: 7 }, card: { ansi: 30, x256: 15 },
+  },
+};
+
+// paint() only ever receives a palette hex, so one hex -> code table covers
+// both themes: accent and good share a hex per theme, and no hex is reused
+// across themes.
+const CODE_BY_HEX = new Map();
+for (const theme of Object.keys(ANSI_BY_ROLE)) {
+  for (const [role, code] of Object.entries(ANSI_BY_ROLE[theme])) {
+    const hex = PALETTES[theme][role];
+    if (hex) CODE_BY_HEX.set(hex.toLowerCase(), code);
+  }
+}
+
+// Accepted values for --color and colorMode().
+const COLOR_MODES = ["auto", "16", "256", "truecolor", "never", "off"];
+
 const ANSI_RE = /\x1b\[[0-9;]*m/g;
 
 function hexToRgb(hex) {
@@ -26,12 +60,42 @@ function hexToRgb(hex) {
   return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
-// Colors are 24-bit, applied only when the caller says the terminal can take
-// them; with color off, paint() is the identity and widths stay exact.
-function paint(text, hex, enabled) {
-  if (!enabled || !hex) return text;
-  const [r, g, b] = hexToRgb(hex);
-  return `\x1b[38;2;${r};${g};${b}m${text}\x1b[39m`;
+// The palette hex when the terminal speaks 24-bit, otherwise the named color
+// standing in for it. Off is the identity, so widths stay exact either way.
+function paint(text, hex, mode) {
+  if (!mode || !hex) return text;
+  if (mode === true || mode === "truecolor") {
+    const [r, g, b] = hexToRgb(hex);
+    return `\x1b[38;2;${r};${g};${b}m${text}\x1b[39m`;
+  }
+  const code = CODE_BY_HEX.get(String(hex).toLowerCase());
+  if (!code) return text;
+  return `\x1b[${mode === "256" ? code.x256 : code.ansi}m${text}\x1b[39m`;
+}
+
+// What the terminal advertises, strongest signal first. Only COLORTERM says
+// 38;2 is understood; TERM=linux and a bare TERM=xterm get the 16-color names.
+function colorCapability(env) {
+  const colorterm = String(env.COLORTERM || "").toLowerCase();
+  if (colorterm === "truecolor" || colorterm === "24bit") return "truecolor";
+  if (/256color|direct/.test(String(env.TERM || "").toLowerCase())) return "256";
+  return "16";
+}
+
+// A --color flag plus the environment, resolved into a paint() mode or false.
+// Auto colors a terminal and keeps pipes plain, honoring NO_COLOR/FORCE_COLOR
+// as the wider ecosystem defines them.
+function colorMode(flag, env = process.env, isTTY = Boolean(process.stdout.isTTY)) {
+  if (flag === false) return false;
+  if (typeof flag === "string") {
+    if (flag === "16" || flag === "256" || flag === "truecolor") return flag;
+    if (flag === "never" || flag === "off") return false;
+  }
+  if (flag === true) return colorCapability(env); // an explicit --color wins
+  if (env.NO_COLOR) return false;
+  if (/^(0|false|none)$/i.test(String(env.FORCE_COLOR || ""))) return false;
+  if (!isTTY && !env.FORCE_COLOR) return false;
+  return colorCapability(env);
 }
 
 function bold(text, enabled) {
@@ -97,5 +161,6 @@ function spinner(tick) {
 
 module.exports = {
   PALETTES, STATE_ROLE, paint, bold, stripAnsi, width, truncate, center, pad,
+  ANSI_BY_ROLE, COLOR_MODES, colorCapability, colorMode,
   fmt, gb, kfmt, ctxfmt, time, spark, bar, spinner, BLOCKS, SPINNER,
 };

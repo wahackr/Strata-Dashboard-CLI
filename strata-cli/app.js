@@ -4,24 +4,24 @@
 const { load } = require("./config.js");
 const { Poller } = require("./client.js");
 const { render } = require("./render.js");
+const { colorMode } = require("./format.js");
 
 const FRAME_MS = 125; // 8 fps animation cadence
 const UP = "\x1b[A";
 const DOWN = "\x1b[B";
 
-function colorEnabled(flag) {
-  if (flag === false) return false;
-  if (flag === true) return true;
-  return Boolean(process.stdout.isTTY) && !process.env.NO_COLOR;
-}
-
 function start(options = {}) {
-  const cfg = load(options);
+  // A pre-resolved config wins: bin/strata.js builds one from --server flags,
+  // and re-reading the file here would silently watch strata.json instead.
+  const cfg = options.config || load(options);
+  const tty = Boolean(process.stdout.isTTY);
   const state = {
     theme: options.theme || cfg.theme,
     compact: options.compact ?? cfg.compact,
     mascot: options.mascot ?? cfg.mascot,
-    color: colorEnabled(options.color),
+    // A mode string, not a boolean: paint() picks 24-bit or the named ANSI
+    // colors depending on what this terminal advertises.
+    color: colorMode(options.color, process.env, tty),
     tick: 0,
     focus: 0,
   };
@@ -30,7 +30,6 @@ function start(options = {}) {
     onPoll: (payload) => { entry.payload = payload; draw(); },
   }));
 
-  const tty = Boolean(process.stdout.isTTY);
   const out = process.stdout;
   const stdin = tty ? process.stdin : null;
 
@@ -46,10 +45,13 @@ function start(options = {}) {
       configSource: cfg.source, refreshMs: entries[state.focus]?.server.refreshMs ?? cfg.servers[0].refreshMs,
       warnings: cfg.warnings,
     });
-    // Home, then rewrite every line with its tail cleared: no full-screen
-    // clear per frame, so the widget does not flicker while animating.
+    // Home, then rewrite every line with its tail cleared, then erase whatever
+    // is left below the last line: compact mode and a shrink on resize would
+    // otherwise leave the previous taller frame's leftovers on screen. No
+    // full-screen clear per frame, so the widget does not flicker while animating.
     let s = "\x1b[H";
     for (const line of lines) s += `${line}\x1b[K\n`;
+    s += "\x1b[0J";
     out.write(s);
   }
 

@@ -87,5 +87,64 @@ assert.equal(parse("[]", { env: env0 }).servers.length, 1, "empty server list st
 assert.equal(parse(JSON.stringify({ url: "http://a:1", theme: "light" }), { env: env0 }).theme, "light");
 assert.equal(parse(JSON.stringify({ url: "http://a:1", theme: "neon" }), { env: env0 }).theme, "dark", "unknown theme falls back");
 
+// ---- command-line flags: a value belongs to the flag it follows ----
+const { parseArgs, cliConfig } = require("../bin/strata.js");
+const cli = parseArgs(["--server", "http://127.0.0.1:8080", "--name", "Home", "--key", "k1", "--interval", "1.5s", "--once", "--json"]);
+assert.equal(cli.servers.length, 1);
+assert.equal(cli.servers[0].url, "http://127.0.0.1:8080", "the url is its own flag's argument, not the next one's");
+assert.equal(cli.servers[0].name, "Home");
+assert.equal(cli.servers[0].apiKey, "k1");
+assert.equal(cli.refreshMs, 1500, "--interval 1.5s is a duration");
+assert.equal(cli.once, true, "a later flag is not consumed as a value");
+assert.equal(cli.json, true);
+assert.deepEqual(cliConfig(cli).servers[0], {
+  id: "srv-1", name: "Home", url: "http://127.0.0.1:8080", apiKey: "k1",
+  keySource: "cli", refreshMs: 1500, timeoutMs: 4000,
+});
+assert.equal(cliConfig(cli).source, "command line", "--server beats the config file");
+
+const repeated = parseArgs(["--server", "http://a:1", "--server", "http://b:2"]);
+assert.deepEqual(repeated.servers.map((s) => s.url), ["http://a:1", "http://b:2"], "--server is repeatable");
+assert.deepEqual(cliConfig(repeated).servers.map((s) => s.name), ["a", "b"], "unnamed servers are labelled by host");
+
+assert.equal(parseArgs(["--color", "256"]).color, "256", "--color takes a mode");
+assert.equal(parseArgs(["--color", "never"]).color, "never");
+const colored = parseArgs(["--color", "256", "--compact", "--once"]);
+assert.deepEqual([colored.color, colored.compact, colored.once], ["256", true, true], "a consumed mode leaves the next flags intact");
+assert.equal(parseArgs(["--color", "--compact"]).color, true, "--color does not eat the next flag");
+assert.equal(parseArgs(["--color"]).color, true);
+assert.equal(parseArgs(["--no-color"]).color, false);
+
+assert.throws(() => parseArgs(["--server"]), ConfigError, /needs a value/);
+assert.throws(() => parseArgs(["--server", "--once"]), ConfigError, /needs a value/, "a flag is never a value");
+assert.throws(() => parseArgs(["--key"]), ConfigError, /needs a value/);
+assert.throws(() => parseArgs(["--name", "x"]), ConfigError, /must follow a --server/);
+assert.throws(() => parseArgs(["--interval", "abc"]), ConfigError, /duration/);
+assert.throws(() => parseArgs(["--theme", "neon"]), ConfigError, /dark or light/);
+assert.throws(() => parseArgs(["--bogus"]), ConfigError, /unknown option/);
+
+// ---- live mode watches --server, not the config file on disk ----
+// start() is driven with a pre-resolved config, and stdout stays captured for
+// the rest of the run so the frames it draws — including the one its rejected
+// poll draws after start() returns — never land in the test output. stop()
+// clears the animation clock and the poll timers.
+const app = require("../strata-cli/app.js");
+const liveCfg = cliConfig(parseArgs(["--server", "http://127.0.0.1:9", "--name", "Cli"]));
+const frames = [];
+const realWrite = process.stdout.write.bind(process.stdout);
+const realExit = process.exit;
+process.stdout.write = (chunk) => { frames.push(String(chunk)); return true; };
+process.exit = () => {};
+try {
+  const handle = app.start({ color: "never", config: liveCfg });
+  assert.equal(handle.cfg, liveCfg, "start() uses the given config instead of re-reading the file");
+  assert.deepEqual(handle.entries.map((e) => e.server.name), ["Cli"], "--server is what the live view watches");
+  assert.ok(frames.join("").includes("Cli"), "the frame shows the CLI server");
+  assert.ok(frames[0].endsWith("\x1b[0J"), "a frame erases the leftover rows below it");
+  assert.ok(frames[0].includes("\x1b[H"), "a frame starts at the top-left instead of clearing the screen");
+  handle.stop();
+} finally {
+  process.exit = realExit;
+}
 fs.rmSync(dir, { recursive: true, force: true });
-console.log("config resolution, credential precedence, refresh clamping and permission warnings OK");
+realWrite("config resolution, credential precedence, refresh clamping, permission warnings, CLI flags and live wiring OK\n");

@@ -60,6 +60,35 @@ assert.equal(f.bar(1.5, { cells: 10 }), "█".repeat(10), "over-1 fractions clam
 assert.equal(f.bar(NaN, { cells: 10 }), "░".repeat(10), "NaN draws empty");
 assert.equal(f.width(f.paint("abc", "#b8f36b", true)), 3, "color codes are not counted as cells");
 
+// ---- color depth: the accent is green on a plain terminal, never yellow ----
+// Quantizing #b8f36b by nearest neighbour lands on yellow (hue ~86°), which is
+// exactly the bug on Alpine's tty / TERM=linux, so the codes are by meaning.
+assert.equal(f.paint("tok", "#b8f36b", "16"), "\x1b[92mtok\x1b[39m", "dark accent is bright green at 16 colors");
+assert.equal(f.paint("tok", "#b8f36b", "256"), "\x1b[10mtok\x1b[39m", "dark accent is bright green at 256 colors");
+assert.equal(f.paint("tok", "#3f7d16", "16"), "\x1b[32mtok\x1b[39m", "light accent is green at 16 colors");
+assert.ok(!f.paint("tok", "#b8f36b", "16").includes("38;2;"), "16-color mode emits no 24-bit codes");
+assert.equal(f.paint("tok", "#b8f36b", false), "tok", "off is the identity");
+assert.equal(f.width(f.paint("tok", "#b8f36b", "16")), 3, "named codes are stripped for width too");
+for (const theme of Object.keys(f.PALETTES)) {
+  for (const [role, hex] of Object.entries(f.PALETTES[theme])) {
+    assert.match(f.paint("x", hex, "16"), /^\x1b\[\d+m/, `${theme}.${role} has a named color for plain terminals`);
+  }
+}
+
+// Auto-detection: only COLORTERM says 38;2 is understood.
+assert.equal(f.colorMode(undefined, { TERM: "linux" }, true), "16", "TERM=linux gets the ANSI names");
+assert.equal(f.colorMode(undefined, { TERM: "xterm-256color" }, true), "256");
+assert.equal(f.colorMode(undefined, { TERM: "xterm-256color", COLORTERM: "truecolor" }, true), "truecolor");
+assert.equal(f.colorMode(undefined, { TERM: "xterm-256color", NO_COLOR: "1" }, true), false, "NO_COLOR wins");
+assert.equal(f.colorMode(true, { TERM: "linux", NO_COLOR: "1" }, true), "16", "an explicit --color still colors");
+assert.equal(f.colorMode(undefined, { TERM: "xterm-256color" }, false), false, "a pipe stays plain");
+assert.equal(f.colorMode(undefined, { TERM: "xterm-256color", FORCE_COLOR: "1" }, false), "256", "FORCE_COLOR colors a pipe");
+assert.equal(f.colorMode(undefined, { TERM: "xterm-256color", FORCE_COLOR: "0" }, true), false);
+assert.equal(f.colorMode(false, { COLORTERM: "truecolor" }, true), false, "--no-color wins over the terminal");
+assert.equal(f.colorMode("never", { TERM: "xterm-256color" }, true), false);
+assert.equal(f.colorMode("256", { TERM: "linux" }, true), "256", "--color 256 overrides TERM");
+assert.equal(f.colorMode("auto", { TERM: "linux" }, true), "16", "--color auto is the default behavior");
+
 // ---- mascot frames never change size ----
 for (const state of mascot.stateList()) {
   for (const tick of [0, 1, 2, 3, 4, 7]) {
