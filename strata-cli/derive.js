@@ -10,8 +10,8 @@ const BADGE = {
 
 const EMPTY = {
   state: "idle", label: "Connecting…", detail: "", pct: 0,
-  speed: null, prefill: null, speedSub: "decode", gpu: null, gpuSub: "",
-  vramUsed: null, vramTotal: null, vramSub: "", temp: null, tempSub: "",
+  speed: null, prefill: null, speedSub: "decode", gpu: null,
+  vramUsed: null, vramTotal: null, temp: null, gpus: [],
   power: null, powerLimit: null, pcie: null, pcieSub: "", cpu: null, cpuSub: "",
   disk: null, diskSub: "", ctxFrac: 0, ctxUsed: 0, ctxMax: 0,
   cache: "–", cacheFrac: 0, ram: "–", ramFrac: 0,
@@ -64,21 +64,27 @@ function derive(payload) {
   d.speedSub = live.state === "generating" ? "decode now"
     : live.state === "reading" ? "prefill now" : last ? "decode last" : "decode";
 
+  // Per-GPU breakdown, once there is more than one GPU to break down. The
+  // aggregates below stay for the compact strip and the single-GPU cards.
   const gpus = hw.gpus || [];
-  const multi = gpus.length > 1;
-  const per = (fn) => gpus.map((g) => `GPU ${g.index} ${fn(g)}`).join(" · ");
+  d.gpus = gpus.length > 1 ? gpus.map((g) => ({
+    index: g.index,
+    name: g.name || `GPU ${g.index}`,
+    util: g.util ?? null,
+    memUsed: g.mem_used ?? null,
+    memTotal: g.mem_total ?? null,
+    temp: g.temp ?? null,
+    power: g.power ?? null,
+    // Server-side PCIe per slot, when the payload carries it (Strata >= ask in
+    // issue #4). Falls back to the shared card in render.
+    pcieGen: g.pcie_gen ?? g.pcie_gen_max ?? null,
+    pcieWidth: g.pcie_width ?? null,
+  })) : [];
 
   d.gpu = hw.gpu_util == null ? null : f.fmt(hw.gpu_util);
-  d.gpuSub = multi ? per((g) => (g.util == null ? "–" : `${f.fmt(g.util)}%`))
-    : st.gpu_name || (st.gpu_note ? "not available" : "");
-
   d.vramUsed = hw.gpu_mem_used == null ? null : f.gb(hw.gpu_mem_used);
   d.vramTotal = hw.gpu_mem_total == null ? null : f.gb(hw.gpu_mem_total, 0);
-  d.vramSub = multi ? per((g) => (g.mem_used == null ? "–" : `${f.gb(g.mem_used)} GB`))
-    : eng.expert_slots ? `${f.kfmt(eng.expert_slots)} experts cached` : (st.gpu_note || "");
-
   d.temp = hw.gpu_temp == null ? null : f.fmt(hw.gpu_temp);
-  d.tempSub = multi ? per((g) => (g.temp == null ? "–" : `${f.fmt(g.temp)}°`)) : "";
 
   d.power = hw.gpu_power == null ? null : f.fmt(hw.gpu_power);
   d.powerLimit = hw.gpu_power_limit == null ? null : f.fmt(hw.gpu_power_limit);

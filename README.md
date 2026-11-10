@@ -124,6 +124,24 @@ Two deliberate departures from the widget: polls never overlap (a tick that is
 still in flight is skipped, instead of queueing fetches against a slow server),
 and the config file is the source of truth rather than a settings overlay.
 
+## Multi-GPU
+
+When `hardware.gpus[]` reports more than one GPU, the consolidated GPU %/VRAM/
+Temp/Power cards are replaced by one row per GPU; Speed pairs with PCIe and CPU
+with Disk. Single-GPU servers keep today's cards. PCIe stays one card — the
+payload only carries server-wide PCIe fields (see issue #4 for per-GPU PCIe).
+
+```
+│   Speed  43.2 t/s     ▁▁▁▁▁▁▁▁▁▁         PCIe   Gen3 x16 · 0.3 MB/s ▁▂▁▁▁▁    │
+│   GPU 0  Tesla P40               ░░░░░░░░░░  0% · 21.9/23 GB · 40 °C · 48 W  │
+│   GPU 1  RTX 4070                ░░░░░░░░░░  0% · 11.5/12 GB · 34 °C · 10 W  │
+│   CPU    0 %          ▁▁▁▁▁▁▁▁▁▁         Disk   0.0 MB/s                     │
+```
+
+The panel is `13 + N` rows, so a tall multi-GPU view collapses to the compact
+strip (which badges a multi-GPU server as `GPU 0% ×2`) before it would scroll.
+Boxes span the full terminal width.
+
 ## Layout
 
 ```

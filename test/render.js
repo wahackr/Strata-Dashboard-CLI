@@ -7,7 +7,7 @@ const path = require("node:path");
 const f = require("../strata-cli/format.js");
 const mascot = require("../strata-cli/mascot.js");
 const { derive } = require("../strata-cli/derive.js");
-const { render } = require("../strata-cli/render.js");
+const { render, panelRows, shortGpuName, PANEL_ROWS } = require("../strata-cli/render.js");
 const { stateOf } = require("../strata-cli/client.js");
 
 const metrics = JSON.parse(fs.readFileSync(path.join(__dirname, "metrics.json"), "utf8"));
@@ -153,4 +153,73 @@ for (let i = 0; i < colored.length; i++) {
 const narrow = render({ entries, width: 40, height: 40, theme: "dark", color: false, compact: true, tick: 0 });
 assert.ok(narrow.length > 0 && narrow.every((l) => f.width(l) <= 48), "narrow terminal clamps gracefully");
 
-console.log("derived metrics, sparkline and bar geometry, mascot frames, and full/compact layout OK");
+// ---- multi-GPU (issue #4) ----
+// Mirrors the verified live payload: Tesla P40 + RTX 4070, aggregate fields
+// present, no per-GPU PCIe yet.
+const multi = {
+  live: { state: "idle" },
+  engine: { max_context: 131072 },
+  hardware: {
+    gpu_util: 0, gpu_mem_used: 35887251456, gpu_mem_total: 37037801472,
+    gpu_temp: 52, gpu_power: 85.94, gpu_power_limit: 450,
+    gpu_pcie_gen: 3, gpu_pcie_gen_max: 3, gpu_pcie_width: 16,
+    gpu_pcie_rx_mb: 0.285, cpu: 12, disk_read_mb: 41.2,
+    gpus: [
+      { index: 0, name: "Tesla P40", util: 0, mem_used: 23487971328, mem_total: 24159191040, temp: 52, power: 56.547 },
+      { index: 1, name: "NVIDIA GeForce RTX 4070", util: 0, mem_used: 12399280128, mem_total: 12878610432, temp: 41, power: 29.391 },
+    ],
+  },
+  hardware_static: { gpu_count: 2 },
+  history: { gpu_util: [0, 0], tok_s: [] },
+  requests: [],
+};
+const md = derive(ok(multi));
+assert.equal(md.gpus.length, 2, "per-GPU breakdown derived when more than one GPU");
+assert.equal(md.gpus[0].name, "Tesla P40");
+assert.equal(md.gpus[1].memTotal, 12878610432, "per-GPU mem_total read");
+assert.equal(shortGpuName("NVIDIA GeForce RTX 4070"), "RTX 4070", "vendor prefix trimmed");
+assert.equal(shortGpuName("Tesla P40"), "Tesla P40", "short names kept");
+assert.equal(derive(ok({ hardware: { gpus: [{ index: 0, name: "A", util: 5 }] } })).gpus.length, 0,
+  "one GPU stays on the consolidated cards");
+
+const gpuEntries = [{ server: servers[0], payload: ok(multi) }];
+const gpuPanel = render({ entries: gpuEntries, width: 100, height: 40, theme: "dark", color: false, tick: 0 });
+assert.ok(gpuPanel.some((l) => l.includes("GPU 0") && l.includes("Tesla P40")), "GPU 0 row drawn");
+assert.ok(gpuPanel.some((l) => l.includes("GPU 1") && l.includes("RTX 4070")), "GPU 1 row drawn with short name");
+assert.ok(!gpuPanel.some((l) => l.includes(" VRAM")), "consolidated VRAM card replaced by rows");
+assert.ok(!gpuPanel.some((l) => l.includes(" Temp")), "consolidated Temp card replaced by rows");
+assert.ok(gpuPanel.some((l) => l.includes("PCIe")), "PCIe card kept (server-wide in this payload)");
+for (const line of gpuPanel) assert.ok(f.width(line) <= 100, `multi-GPU line fits: ${JSON.stringify(line)}`);
+// The util bar must not eat the value tail: power and per-slot PCIe have to
+// survive at common widths, not truncate away.
+assert.ok(gpuPanel.some((l) => l.includes("57 W")) && gpuPanel.some((l) => l.includes("29 W")), "per-GPU power drawn in full");
+const withPcie = ok({ ...multi, hardware: { ...multi.hardware,
+  gpus: multi.hardware.gpus.map((g) => ({ ...g, pcie_gen: 4, pcie_width: g.index === 0 ? 16 : 8 })) } });
+const pciePanel = render({ entries: [{ server: servers[0], payload: withPcie }], width: 100, height: 40, theme: "dark", color: false, tick: 0 });
+assert.ok(pciePanel.some((l) => l.includes("Gen4 x16")), "per-GPU PCIe renders when the payload carries it");
+assert.ok(pciePanel.some((l) => l.includes("Gen4 x8")), "second GPU gets its own PCIe slot");
+assert.ok(pciePanel.every((l) => f.width(l) <= 100), "per-GPU PCIe lines still fit");
+assert.equal(panelRows(ok(multi)), 15, "2-GPU panel is 13 + N rows");
+assert.equal(gpuPanel.length, panelRows(ok(multi)) + 2, "drawn frame = header + panel + help");
+assert.equal(panelRows(ok(metrics)), PANEL_ROWS, "single-GPU panel keeps PANEL_ROWS");
+
+// The taller panel collapses earlier: 3 GPUs needs 16 rows + header + help.
+const three = ok({ ...multi, hardware: { ...multi.hardware,
+  gpus: multi.hardware.gpus.concat({ index: 2, name: "Tesla P100", util: null, mem_used: null, mem_total: null, temp: null, power: null }) } });
+assert.equal(panelRows(three), 16, "3-GPU panel height");
+const tight = render({ entries: [{ server: servers[0], payload: three }, { server: servers[1], payload: three }],
+  width: 100, height: 17, theme: "dark", color: false, tick: 0 });
+assert.equal(tight.length, 4, "auto-compact when the GPU rows would overflow (single server keeps its panel by design)");
+const threePanel = render({ entries: [{ server: servers[0], payload: three }], width: 100, height: 40, theme: "dark", color: false, tick: 0 });
+assert.ok(threePanel.some((l) => l.includes("GPU 2") && l.includes("–")), "missing per-GPU fields render as dashes");
+
+// Compact strip carries the GPU count badge.
+const gpuStrip = render({ entries: gpuEntries, width: 100, height: 40, theme: "dark", color: false, compact: true, tick: 0 });
+assert.ok(gpuStrip.some((l) => l.includes("GPU") && l.includes("×2")), "compact strip badges multiple GPUs");
+
+// Full-width box: no 120-col cap.
+const wide = render({ entries: gpuEntries, width: 200, height: 40, theme: "dark", color: false, tick: 0 });
+assert.ok(wide.some((l) => l.startsWith("╭") && f.width(l) === 200), "box spans the screen width");
+for (const line of wide) assert.ok(f.width(line) <= 200, "wide lines still fit");
+
+console.log("derived metrics, sparkline and bar geometry, mascot frames, multi-GPU rows, and full/compact layout OK");
