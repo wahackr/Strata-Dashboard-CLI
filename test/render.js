@@ -60,6 +60,35 @@ assert.equal(f.bar(1.5, { cells: 10 }), "█".repeat(10), "over-1 fractions clam
 assert.equal(f.bar(NaN, { cells: 10 }), "░".repeat(10), "NaN draws empty");
 assert.equal(f.width(f.paint("abc", "#b8f36b", true)), 3, "color codes are not counted as cells");
 
+// ---- ASCII gauges and sparklines ----
+// On a framebuffer with no block glyphs, █ and ░ collapse into the same box or
+// into mojibake, so the filled/unfilled split has to come from different
+// characters. A bracketed gauge stays legible in cp437 and keeps its width.
+assert.match(f.bar(0.5, { cells: 20, ascii: true }), /^\[#+-*\]$/, "ascii gauge is brackets, hashes and dashes");
+for (const cells of [3, 7, 20, 30, 59]) {
+  for (const frac of [0, 0.25, 0.5, 0.75, 1, 1.5, NaN]) {
+    assert.equal(f.width(f.bar(frac, { cells, ascii: true })), cells, `ascii gauge keeps ${cells} cells at ${frac}`);
+  }
+}
+assert.equal(f.bar(0, { cells: 10, ascii: true }), "[" + "-".repeat(8) + "]", "an empty gauge still shows the ends");
+assert.equal(f.bar(1, { cells: 10, ascii: true }), "[" + "#".repeat(8) + "]", "a full gauge is all hashes");
+assert.equal(f.bar(0.5, { cells: 3, ascii: true }), "[#]", "a 3-cell gauge has room for one hash");
+assert.equal(f.bar(0.5, { cells: 2, ascii: true }), "##", "below 3 cells there is no room for brackets");
+assert.ok(!f.bar(0.5, { cells: 20, ascii: true }).includes("@"), "no @ in the ascii gauge");
+// The ASCII scale is ordered quiet to loud, and index 0 is blank rather than a
+// comma sitting on a baseline: a zero run reads as empty, and a nonzero sample
+// never lands on the empty cell.
+assert.equal(f.spark([0, 0, 0], { cells: 3, ascii: true }), "   ", "all-zero ascii history is blank");
+assert.ok(!f.spark([0, 1, 2, 4, 8], { cells: 5, ascii: true }).includes(","), "the ascii scale has no comma");
+assert.equal(f.spark([0, 1, 2, 4, 8], { cells: 5, ascii: true }), " ..=#", "ascii intensity rises with the value");
+assert.ok(f.spark([1, 2, 3, 4], { cells: 8, ascii: true }).startsWith(" "), "ascii spark still right-anchors a warm-up");
+for (const cells of [4, 10, 12]) {
+  const s = f.spark([3, 6, 9], { cells, ascii: true });
+  assert.equal(f.width(s), cells, `ascii spark keeps ${cells} cells`);
+  assert.ok(!/[^\x00-\x7F]/.test(s), "the ascii scale is pure ASCII");
+  assert.ok(!/^ +$/.test(s), "a nonzero ascii spark is not all blank");
+}
+
 // ---- color depth: the accent is green on a plain terminal, never yellow ----
 // Quantizing #b8f36b by nearest neighbour lands on yellow (hue ~86°), which is
 // exactly the bug on Alpine's tty / TERM=linux, so the codes are by meaning.
@@ -78,7 +107,7 @@ const FOREGROUND = /^\x1b\[(3[0-7]|9[0-7]|38;(5|2);[\d;]+|22|39)m$/;
 for (const theme of Object.keys(f.PALETTES)) {
   for (const [role, hex] of Object.entries(f.PALETTES[theme])) {
     assert.match(f.paint("x", hex, "16"), /^\x1b\[\d+m/, `${theme}.${role} has a named color for plain terminals`);
-    for (const mode of ["16", "256", "truecolor"]) {
+    for (const mode of ["16", "256", "truecolor", "console"]) {
       for (const code of f.paint("x", hex, mode).match(/\x1b\[[0-9;]*m/g)) {
         assert.ok(FOREGROUND.test(code), `${theme}.${role} at ${mode} paints ${JSON.stringify(code)}, not a foreground`);
       }
@@ -86,19 +115,51 @@ for (const theme of Object.keys(f.PALETTES)) {
   }
 }
 
-// Auto-detection: only COLORTERM says 38;2 is understood.
-assert.equal(f.colorMode(undefined, { TERM: "linux" }, true), "16", "TERM=linux gets the ANSI names");
+// Auto-detection: only COLORTERM says 38;2 is understood, and the kernel
+// console overrides even that.
+assert.equal(f.colorMode(undefined, { TERM: "linux" }, true), "console", "TERM=linux gets the console palette");
 assert.equal(f.colorMode(undefined, { TERM: "xterm-256color" }, true), "256");
 assert.equal(f.colorMode(undefined, { TERM: "xterm-256color", COLORTERM: "truecolor" }, true), "truecolor");
 assert.equal(f.colorMode(undefined, { TERM: "xterm-256color", NO_COLOR: "1" }, true), false, "NO_COLOR wins");
-assert.equal(f.colorMode(true, { TERM: "linux", NO_COLOR: "1" }, true), "16", "an explicit --color still colors");
+assert.equal(f.colorMode(true, { TERM: "linux", NO_COLOR: "1" }, true), "console", "an explicit --color still colors");
+// The reported bug: a shell profile or a tmux session elsewhere exports
+// COLORTERM=truecolor, and vconsole honors TERM=linux, not that. Describing a
+// different terminal is worse than describing this one, so TERM=linux wins.
+assert.equal(f.colorMode(undefined, { TERM: "linux", COLORTERM: "truecolor" }, true), "console",
+  "an inherited COLORTERM does not override the kernel console");
+assert.equal(f.colorCapability({ TERM: "linux", COLORTERM: "truecolor" }), "console", "capability agrees with colorMode");
+assert.equal(f.colorCapability({ TERM: "LINUX" }), "console", "TERM is matched case-insensitively");
+assert.equal(f.colorMode("truecolor", { TERM: "linux" }, true), "truecolor", "--color truecolor still overrides TERM=linux");
+assert.equal(f.colorMode("16", { TERM: "linux" }, true), "16", "--color 16 overrides TERM=linux");
+assert.equal(f.colorMode("console", { TERM: "xterm-256color" }, true), "console", "--color console works anywhere");
+assert.equal(f.colorMode("console", { TERM: "xterm-256color" }, false), "console", "--color console colors a pipe");
 assert.equal(f.colorMode(undefined, { TERM: "xterm-256color" }, false), false, "a pipe stays plain");
 assert.equal(f.colorMode(undefined, { TERM: "xterm-256color", FORCE_COLOR: "1" }, false), "256", "FORCE_COLOR colors a pipe");
 assert.equal(f.colorMode(undefined, { TERM: "xterm-256color", FORCE_COLOR: "0" }, true), false);
 assert.equal(f.colorMode(false, { COLORTERM: "truecolor" }, true), false, "--no-color wins over the terminal");
 assert.equal(f.colorMode("never", { TERM: "xterm-256color" }, true), false);
 assert.equal(f.colorMode("256", { TERM: "linux" }, true), "256", "--color 256 overrides TERM");
-assert.equal(f.colorMode("auto", { TERM: "linux" }, true), "16", "--color auto is the default behavior");
+assert.equal(f.colorMode("auto", { TERM: "linux" }, true), "console", "--color auto is the default behavior");
+
+// ---- the console palette ----
+// 8 foreground colors on a black framebuffer: bright black (90) is barely
+// visible, which is what made muted text and the box look like empty space on
+// an Arch vconsole. The low-contrast roles get a real color; the status colors
+// keep their 91/92/93 so good/warn/bad still mean the same thing.
+assert.equal(f.paint("tok", f.PALETTES.dark.muted, "console"), "\x1b[37mtok\x1b[39m", "dark muted is white on the console");
+assert.equal(f.paint("box", f.PALETTES.dark.border, "console"), "\x1b[36mbox\x1b[39m", "dark border is cyan on the console");
+assert.equal(f.paint("tok", f.PALETTES.dark.accent, "console"), "\x1b[92mtok\x1b[39m", "dark accent stays green");
+assert.equal(f.paint("tok", f.PALETTES.dark.good, "console"), "\x1b[92mtok\x1b[39m", "generating stays green");
+assert.equal(f.paint("tok", f.PALETTES.dark.warn, "console"), "\x1b[93mtok\x1b[39m", "queued stays yellow");
+assert.equal(f.paint("tok", f.PALETTES.dark.bad, "console"), "\x1b[91mtok\x1b[39m", "error stays red");
+assert.equal(f.paint("tok", f.PALETTES.light.muted, "console"), "\x1b[90mtok\x1b[39m", "the light theme is untouched");
+assert.ok(!f.paint("tok", f.PALETTES.dark.muted, "console").includes("38;"), "console mode emits no indexed or 24-bit codes");
+assert.ok(!f.paint("tok", f.PALETTES.dark.border, "console").includes("38;"), "console borders stay plain codes");
+// The bump must never reach the roles that already read well, and must not
+// invent a code for a theme that has no console entry.
+for (const [role, hex] of Object.entries(f.PALETTES.dark)) {
+  assert.match(f.paint("x", hex, "console"), /^\x1b\[(3[0-7]|9[0-7])m/, `dark.${role} has a plain console foreground`);
+}
 
 // ---- mascot frames never change size ----
 for (const state of mascot.stateList()) {
@@ -109,6 +170,33 @@ for (const state of mascot.stateList()) {
   }
 }
 assert.ok(mascot.frame("nonsense-state", 0).length === mascot.H, "unknown state falls back to idle");
+
+// The Unicode face uses ◕/◡/✕, none of which exist in the console font, so it
+// arrived as boxes on a vconsole. The ASCII face is built from ASCII only and
+// is sized cell-for-cell like the Unicode one, so the panel does not twitch.
+for (const state of mascot.stateList()) {
+  for (const tick of [0, 1, 2, 3, 4, 7]) {
+    const rows = mascot.frame(state, tick, true);
+    assert.equal(rows.length, mascot.H, `${state} ascii frame height is fixed`);
+    for (const row of rows) {
+      assert.equal(f.width(row), mascot.W, `${state} ascii frame width is fixed`);
+      assert.ok(!/[^\x00-\x7F]/.test(row), `${state} ascii frame row is pure ASCII: ${JSON.stringify(row)}`);
+    }
+    const uni = mascot.frame(state, tick);
+    uni.forEach((row, i) => assert.equal(f.width(rows[i]), f.width(row), `${state} tick ${tick}: ascii row ${i} matches the unicode row`));
+  }
+}
+assert.ok(!mascot.stateList().some((s) => mascot.frame(s, 0, true).join("").includes("@")), "the ascii mascot has no @");
+// The face has to be readable, not a row of identical characters: the eyes are
+// two separated marks and the mouth differs between states.
+for (const state of mascot.stateList()) {
+  const eyes = mascot.ASCII_FACE[state].eyes;
+  assert.equal(eyes.length, 5, "ascii eyes keep the unicode 5-cell width");
+  assert.ok(!/^(\S)\1+$/.test(eyes), `${state} ascii eyes are two marks, not a solid bar`);
+}
+assert.notEqual(mascot.ASCII_FACE.idle.mouth, mascot.ASCII_FACE.generating.mouth, "idle and generating mouths differ");
+assert.ok(!/[^\x00-\x7F]/.test(mascot.inline("generating", true)), "the compact inline face is ascii");
+assert.equal(f.width(mascot.inline("generating", true)), f.width(mascot.inline("generating")), "ascii inline face keeps its width");
 
 // ---- whole-frame layout ----
 const servers = [
@@ -151,6 +239,24 @@ asciiFrame.forEach((l, i) => assert.equal(f.width(l), f.width(lines[i]), `ascii 
 assert.ok(asciiFrame.every((l) => !/[^\x00-\x7F]/.test(l)), "every glyph has an ASCII twin");
 const asciiStrip = render({ entries, width, height: 40, theme: "dark", color: false, ascii: true, compact: true, tick: 1 });
 assert.ok(asciiStrip.every((l) => !/[^\x00-\x7F]/.test(l)), "the compact strip is ascii too");
+// The gauges are the readability fix itself: brackets and hashes, no @, and
+// the filled/unfilled split obvious even when the font has no half-blocks.
+assert.ok(asciiFrame.some((l) => /\[[#+-]*\]/.test(l)), "ascii frame draws bracket gauges");
+assert.ok(!asciiFrame.join("\n").includes("@"), "no @ anywhere in the ascii frame");
+assert.ok(asciiFrame.some((l) => /\[\#+-+\]/.test(l)), "a gauge shows both filled and unfilled cells");
+
+// Same frame, console palette: color must not move a single cell, and no code
+// may conceal or set a background (the original blank-screen failure).
+for (const w of [40, 60, 80, 100]) {
+  const plain = render({ entries, width: w, height: 40, theme: "dark", color: false, ascii: true, mascot: true, tick: 3 });
+  const consoleFrame = render({ entries, width: w, height: 40, theme: "dark", color: "console", ascii: true, mascot: true, tick: 3 });
+  assert.equal(consoleFrame.length, plain.length, `console palette keeps the row count at width ${w}`);
+  consoleFrame.forEach((l, i) => assert.equal(f.width(l), f.width(plain[i]), `console row ${i} keeps its cell count at width ${w}`));
+  assert.ok(consoleFrame.every((l) => !/\x1b\[(8|10|11|15)m/.test(l)), `console frame conceals nothing at width ${w}`);
+  assert.ok(consoleFrame.some((l) => l.includes("\x1b[37m")), `console frame brightens muted text at width ${w}`);
+  assert.ok(consoleFrame.some((l) => l.includes("\x1b[36m")), `console frame paints the border at width ${w}`);
+}
+
 assert.equal(f.asciiMode(true, {}), true, "--ascii beats the environment");
 assert.equal(f.asciiMode(false, { TERM: "dumb" }), false, "--no-ascii beats the environment");
 assert.equal(f.asciiMode(undefined, { LANG: "en_US.UTF-8", TERM: "xterm-256color" }), false, "a UTF-8 terminal keeps the glyphs");
@@ -268,4 +374,4 @@ for (const payload of [ok(multi), three, withPcie]) {
 assert.ok(render({ entries: gpuEntries, width: 100, height: 40, theme: "dark", color: false, ascii: true, compact: true, tick: 0 })
   .every((l) => !/[^\x00-\x7F]/.test(l)), "the ×N badge is ascii");
 
-console.log("derived metrics, sparkline and bar geometry, mascot frames, multi-GPU rows, and full/compact layout OK");
+console.log("derived metrics, sparkline and gauge geometry, mascot frames, multi-GPU rows, ascii fallback, console palette, and full/compact layout OK");

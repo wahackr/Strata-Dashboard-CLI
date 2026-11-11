@@ -6,21 +6,21 @@ draws in its Electron window, rendered in your shell, for as many servers as you
 point at. No dependencies: Node 24 and ANSI only.
 
 ```
-✴ Strata CLI  ·  1 server  ·  refresh 0.5s  ·  theme dark  ·  ./strata.json
-╭─ ▸ ✴ Home · ● idle 25ms ───────────────────────────────────────────────────────────────╮
+✷ Strata CLI  ·  1 server  ·  refresh 0.5s  ·  theme dark  ·  ./strata.json
+╭─ ▸ ✷ Home · ● idle 25ms ───────────────────────────────────────────────────────────────╮
 │ http://127.0.0.1:8080  ·  qwen3.8-flash-next                                           │
-│    z         srv-1    ● idle                                                           │
+│        z     srv-1    ● idle                                                           │
 │  ╭───────╮     Waiting for a request                                                   │
 │  ╱ ─   ─ ╲     last: 94 tokens at 54.4 tok/s                                           │
 │   ╲  ‿  ╱      ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    │
 │  ╰───────╯     refresh 0.5 s · key config                                              │
-│   Speed  54.4 t/s     ▁▁▁▁▁▁▁▁▁▁              PCIe   Gen3 x16 · 0.3 MB/s ▁▁▁▁▁▁▁▁▁▁    │
-│   GPU 0  Tesla P40                 ░░░░░░░░░░░░░░░░░░░  0% · 21.9/23 GB · 62 °C · 52 W │
-│   GPU 1  RTX 4070                  ░░░░░░░░░░░░░░░░░░░  0% · 11.8/12 GB · 46 °C · 24 W │
-│   CPU    0 %          ▁▁▁▁▁▁▁▁▁▁              Disk   0.0 MB/s ▁▁▁▁▁▁▁▁▁▁               │
-│   Ctx  52%  ███████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  66,280 / 128k│
-│   Cache 16,902 experts · 20.6 GB  RAM 48.1 / 62 GB ████████░░                          │
-│   Last 10:33:46 AM  Done · 66,186 in / 66,141 reused / 94 out · 54.4 t/s               │
+│   Speed  54.4 t/s ▁▂▃▆█▇▄▂▁▁      PCIe   Gen3 x16 · … ▁▁▁▁▁▁▁▁▁▁                       │
+│   GPU 0  Tesla P40                 ░░░░░░░░  0% · 21.9/23 GB · 62 °C · 52 W · Gen3 x16 │
+│   GPU 1  RTX 4070                  ░░░░░░░░  0% · 11.8/12 GB · 46 °C · 24 W · Gen3 x16 │
+│   CPU    0 % ▁▁▁▁▁▁▁▁▁▁           Disk   0.0 MB/s · … ▁▁▁▁▁▁▁▁▁▁                       │
+│   Ctx  51%  █████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░  66,280 / 128k           │
+│   Cache 16,902 experts · 20.5 GB    RAM 48.1 / 62 GB     ████████░░                    │
+│   Last 01:13:46 PM  Done · 66,186 in / 66,141 reused / 94 out · 54.4 t/s               │
 ╰────────────────────────────────────────────────────────────────────────────────────────╯
 q quit · space refresh · c compact · d theme · m mascot · 1-9 focus · ↑/↓ select
 ```
@@ -92,7 +92,7 @@ as one server, matching the widget's migration of old `settings.json` files.
 | `--theme <dark\|light>` | theme |
 | `--compact` | one line per server, like the widget's compact strip |
 | `--no-mascot` / `--no-color` | drop the blob / drop ANSI |
-| `--color [auto\|16\|256\|truecolor\|never]` | force a palette depth |
+| `--color [auto\|16\|256\|truecolor\|console\|never]` | force a palette depth |
 | `--ascii` / `--no-ascii` | force ASCII glyphs / force the Unicode glyphs (`--utf8` = `--no-ascii`) |
 | `--once` | poll each server once, print, exit |
 | `--json` | with `--once`, raw payloads for piping |
@@ -109,19 +109,48 @@ a bare palette index is a different SGR verb, where `8` conceals and `10` sets
 the background. `NO_COLOR` turns color off and `FORCE_COLOR` turns it on for
 pipes; an explicit `--color` beats both.
 
+`TERM=linux` decides the palette before `COLORTERM` is even read, so a
+`truecolor` value inherited from a GUI terminal cannot smuggle 24-bit codes into
+the kernel vconsole: auto there means `console`, and `--color console` forces
+it. In that mode muted text is light grey (`37`) instead of the dark grey (`90`)
+that disappears on a black console, borders are cyan (`36`) for the same reason,
+and status keeps its recognizable red/green/yellow (`91/92/93`). Borders are
+painted in the border color everywhere, rather than inheriting whatever color
+the row happened to use.
+
 **Glyphs.** The box drawing, block sparklines and mascot are Unicode. Auto
 detects a terminal that can't render them — no UTF-8 locale (`LANG=C` over ssh),
 `TERM=dumb`, `unknown` or `linux` (the kernel console's cp437 font has no
-half-blocks) — and replaces every glyph with a same-width ASCII twin: `+ - | > *
-. - ~ , : - = + % @`. One cell in, one cell out, so the box still lines up.
-`--ascii` forces the fallback, `--no-ascii` forces Unicode, and `STRATA_ASCII=1`
-/ `STRATA_ASCII=0` do the same for shells you can't pass flags to. The multi-GPU
-rows from the section below, rendered `--ascii`:
+half-blocks) — and replaces every glyph with a same-width ASCII twin: boxes
+become `+ - | / \`, the state dot `*`, separators `.`, the mascot a `- o x _ ~`
+face, gauges a bracketed `[######----]` where `#` is filled and `-` is not, and
+sparklines the seven-step scale ` .-+=*#`. One cell in, one cell out, so the box
+still lines up. Nothing fills with `@` and no gauge is a run of dots: on a
+framebuffer that lacks the half-block glyph, `█` and `░` collapse into each
+other, and an all-empty bar of dots read as a full one. A blank sparkline cell
+means no traffic — a nonzero sample never maps to it. `--ascii` forces the
+fallback, `--no-ascii` forces Unicode, and `STRATA_ASCII=1` / `STRATA_ASCII=0`
+do the same for shells you can't pass flags to. The whole preview again in the
+ASCII set, which is what `TERM=linux` and any non-UTF-8 shell sees:
 
 ```
-|   Speed  51.4 t/s     +++*@@@%@,             PCIe   Gen3 x16 . ~ ,,,,,,,,,,          |
-|   GPU 0  Tesla P40                 .................  0% . 21.9/23 GB . 63 C  . 60 W |
-|   GPU 1  RTX 4070                  .................  0% . 11.8/12 GB . 47 C  . 42 W |
+* Strata CLI  .  1 server  .  refresh 0.5s  .  theme dark  .  ./strata.json
++- > * Home . * idle 25ms ---------------------------------------------------------------+
+| http://127.0.0.1:8080  .  qwen3.8-flash-next                                           |
+|        z     srv-1    * idle                                                           |
+|  .-------.     Waiting for a request                                                   |
+|  | -   - |     last: 94 tokens at 54.4 tok/s                                           |
+|   |  _  |      [------------------------------------------------------------------]    |
+|  '-------'     refresh 0.5 s . key config                                              |
+|   Speed  54.4 t/s  .-+#*=.        PCIe   Gen3 x16 . ~                                  |
+|   GPU 0  Tesla P40                 [------]  0% . 21.9/23 GB . 62 C  . 52 W . Gen3 x16 |
+|   GPU 1  RTX 4070                  [------]  0% . 11.8/12 GB . 46 C  . 24 W . Gen3 x16 |
+|   CPU    0 %                      Disk   0.0 MB/s . ~                                  |
+|   Ctx  51%  [########################-----------------------]  66,280 / 128k           |
+|   Cache 16,902 experts . 20.5 GB    RAM 48.1 / 62 GB     [######--]                    |
+|   Last 01:13:46 PM  Done . 66,186 in / 66,141 reused / 94 out . 54.4 t/s               |
++----------------------------------------------------------------------------------------+
+q quit . space refresh . c compact . d theme . m mascot . 1-9 focus . ^/v select
 ```
 
 **Blank screen?** Three things can hide the frame, in the order they are usually
@@ -141,6 +170,12 @@ the culprit:
 
 `--once` sidesteps all three: no screen switch, no cursor movement, one plain
 frame you can redirect.
+
+**Visible but hard to read?** That is contrast, not concealment. `--color
+console` brightens muted text and borders on the kernel vconsole; `--theme
+light` helps on a white-backed terminal, and `--color never` removes color from
+the comparison entirely. The ASCII gauges and sparkline scale are legible even
+with color off.
 
 **Redrawing.** Each frame homes the cursor, rewrites every line, and erases
 whatever is left below the last one, so toggling `c` for compact mode or
@@ -174,10 +209,10 @@ with Disk. Single-GPU servers keep today's cards. PCIe stays one card — the
 payload only carries server-wide PCIe fields (see issue #4 for per-GPU PCIe).
 
 ```
-│   Speed  54.4 t/s     ▁▁▁▁▁▁▁▁▁▁              PCIe   Gen3 x16 · 0.3 MB/s ▁▁▁▁▁▁▁▁▁▁    │
-│   GPU 0  Tesla P40                 ░░░░░░░░░░░░░░░░░░░  0% · 21.9/23 GB · 62 °C · 52 W │
-│   GPU 1  RTX 4070                  ░░░░░░░░░░░░░░░░░░░  0% · 11.8/12 GB · 46 °C · 24 W │
-│   CPU    0 %          ▁▁▁▁▁▁▁▁▁▁              Disk   0.0 MB/s ▁▁▁▁▁▁▁▁▁▁               │
+│   Speed  54.4 t/s ▁▂▃▆█▇▄▂▁▁      PCIe   Gen3 x16 · … ▁▁▁▁▁▁▁▁▁▁                       │
+│   GPU 0  Tesla P40                 ░░░░░░░░  0% · 21.9/23 GB · 62 °C · 52 W · Gen3 x16 │
+│   GPU 1  RTX 4070                  ░░░░░░░░  0% · 11.8/12 GB · 46 °C · 24 W · Gen3 x16 │
+│   CPU    0 % ▁▁▁▁▁▁▁▁▁▁           Disk   0.0 MB/s · … ▁▁▁▁▁▁▁▁▁▁                       │
 ```
 
 The panel is `13 + N` rows, so a tall multi-GPU view collapses to the compact
