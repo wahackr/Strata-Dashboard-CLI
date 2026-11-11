@@ -70,7 +70,13 @@ function paint(text, hex, mode) {
   }
   const code = CODE_BY_HEX.get(String(hex).toLowerCase());
   if (!code) return text;
-  return `\x1b[${mode === "256" ? code.x256 : code.ansi}m${text}\x1b[39m`;
+  // The 16-color codes are already SGR foregrounds (30-37, 90-97); a palette
+  // index needs the 38;5; prefix. Emitting the bare index is a different verb:
+  // \x1b[8m is conceal, \x1b[10m is primary background, \x1b[15m is not a color
+  // at all — which is why a TERM=*256color terminal with no COLORTERM showed an
+  // empty screen. paint() closes with 39 (foreground only), so conceal would
+  // never lift.
+  return `\x1b[${mode === "256" ? `38;5;${code.x256}` : code.ansi}m${text}\x1b[39m`;
 }
 
 // What the terminal advertises, strongest signal first. Only COLORTERM says

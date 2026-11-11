@@ -64,14 +64,25 @@ assert.equal(f.width(f.paint("abc", "#b8f36b", true)), 3, "color codes are not c
 // Quantizing #b8f36b by nearest neighbour lands on yellow (hue ~86°), which is
 // exactly the bug on Alpine's tty / TERM=linux, so the codes are by meaning.
 assert.equal(f.paint("tok", "#b8f36b", "16"), "\x1b[92mtok\x1b[39m", "dark accent is bright green at 16 colors");
-assert.equal(f.paint("tok", "#b8f36b", "256"), "\x1b[10mtok\x1b[39m", "dark accent is bright green at 256 colors");
+assert.equal(f.paint("tok", "#b8f36b", "256"), "\x1b[38;5;10mtok\x1b[39m", "dark accent is bright green at 256 colors");
 assert.equal(f.paint("tok", "#3f7d16", "16"), "\x1b[32mtok\x1b[39m", "light accent is green at 16 colors");
 assert.ok(!f.paint("tok", "#b8f36b", "16").includes("38;2;"), "16-color mode emits no 24-bit codes");
 assert.equal(f.paint("tok", "#b8f36b", false), "tok", "off is the identity");
 assert.equal(f.width(f.paint("tok", "#b8f36b", "16")), 3, "named codes are stripped for width too");
+// Every escape paint() emits has to be a foreground verb. A bare SGR number is
+// a different verb: 8 conceals, 10 sets the background, 15 is not a color at
+// all — and paint() closes with 39, which resets only the foreground, so a
+// concealed frame never un-conceals. That is what made the screen look empty on
+// a TERM=*256color terminal with no COLORTERM.
+const FOREGROUND = /^\x1b\[(3[0-7]|9[0-7]|38;(5|2);[\d;]+|22|39)m$/;
 for (const theme of Object.keys(f.PALETTES)) {
   for (const [role, hex] of Object.entries(f.PALETTES[theme])) {
     assert.match(f.paint("x", hex, "16"), /^\x1b\[\d+m/, `${theme}.${role} has a named color for plain terminals`);
+    for (const mode of ["16", "256", "truecolor"]) {
+      for (const code of f.paint("x", hex, mode).match(/\x1b\[[0-9;]*m/g)) {
+        assert.ok(FOREGROUND.test(code), `${theme}.${role} at ${mode} paints ${JSON.stringify(code)}, not a foreground`);
+      }
+    }
   }
 }
 
@@ -117,6 +128,13 @@ assert.ok(lines.some((l) => l.includes("Server not reachable")), "offline server
 assert.ok(lines.some((l) => l.includes("● generating") || l.includes("● idle") || l.includes("● reading")), "state tag drawn");
 assert.ok(lines.some((l) => l.includes("Ctx")), "context card drawn");
 assert.ok(lines.some((l) => l.includes("Strata CLI")), "header drawn");
+// The blank-screen report was 256-color mode emitting bare palette indices,
+// which are conceal (8) and background (10) rather than foreground colors.
+const painted = render({ entries, width, height: 40, theme: "dark", color: "256", mascot: true, tick: 3 });
+assert.ok(painted.every((l) => !/\x1b\[(8|10|11|15)m/.test(l)), "a 256-color frame conceals nothing");
+assert.ok(painted.some((l) => l.includes("\x1b[38;5;")), "the 256-color frame paints indexed foregrounds");
+assert.equal(painted.length, lines.length, "color changes no geometry");
+painted.forEach((l, i) => assert.equal(f.width(l), f.width(lines[i]), `painted row ${i} keeps its cell count`));
 
 // Compact mode: exactly one line per server between header and help.
 const compact = render({ entries, width, height: 40, theme: "dark", color: false, compact: true, tick: 1 });
