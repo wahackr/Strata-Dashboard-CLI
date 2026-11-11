@@ -13,10 +13,19 @@
   },
   "scripts": {
     "start": "node bin/strata.js",
+    "release": "semantic-release",
     "check": "node --check bin/strata.js && node --check strata-cli/app.js && node --check strata-cli/client.js && node --check strata-cli/config.js && node --check strata-cli/derive.js && node --check strata-cli/format.js && node --check strata-cli/mascot.js && node --check strata-cli/render.js",
     "test": "node test/config.js && node test/client.js && node test/render.js"
   },
   "engines": {
     "node": ">=24"
+  },
+  "devDependencies": {
+    "@semantic-release/commit-analyzer": "13.0.1",
+    "@semantic-release/git": "11.0.1",
+    "@semantic-release/github": "12.0.10",
+    "@semantic-release/npm": "13.2.0",
+    "@semantic-release/release-notes-generator": "14.1.1",
+    "semantic-release": "25.0.9"
   }
 }

@@ -3,7 +3,7 @@
 A terminal monitor for the [Strata](https://github.com/Niko1221/Strata) inference
 server — the same numbers the [Strata Widget](https://github.com/wahackr/Strata-Dashboard)
 draws in its Electron window, rendered in your shell, for as many servers as you
-point at. No dependencies: Node 24 and ANSI only.
+point at. No runtime dependencies: Node 24 and ANSI only.
 
 ```
 ✷ Strata CLI  ·  1 server  ·  refresh 0.5s  ·  theme dark  ·  ./strata.json
@@ -26,18 +26,84 @@ q quit · space refresh · c compact · d theme · m mascot · 1-9 focus · ↑/
 ```
 
 Two GPUs in one server, so the GPU %/VRAM/Temp/Power cards become one row per
-slot — that is the `GPU 0` / `GPU 1` pair above, and why the panel is taller
-than it used to be. See [Multi-GPU](#multi-gpu).
+slot — the `GPU 0` / `GPU 1` pair above. The panel grows to fit both GPUs. See [Multi-GPU](#multi-gpu).
 
-## Run
+## Contents
+
+- [How it works](#how-it-works)
+- [Usage](#usage)
+- [Development](#development)
+- [Releases](#releases)
+
+## How it works
+
+```mermaid
+flowchart TD
+    A[Parse CLI arguments] --> B[Resolve servers and settings]
+    B --> C{Snapshot or live terminal?}
+    C -->|--once or redirected output| D[Poll servers once in sequence]
+    D --> E[Print a frame or JSON and exit]
+    C -->|Live terminal| F[Start independent server pollers]
+    F --> G[Store latest payload per server]
+    G --> H[Derive metrics and render terminal]
+    H --> F
+    I[125 ms animation clock, keys and resize] --> H
+```
+
+1. **Startup and configuration.** `bin/strata.js` parses flags and handles
+   `--help`. Explicit `--server` entries replace the configured server list.
+   Otherwise, `config.js` loads `--config`, then searches `$STRATA_CONFIG`,
+   `./strata.json`, and the user's config directory in that order. With no file,
+   it watches `http://127.0.0.1:8080`. It normalizes server settings and resolves
+   API keys; display flags override the loaded display settings.
+2. **Choose an output mode.** `--once` or output redirected to a pipe/file
+   selects a snapshot: each server is polled in sequence, then the CLI prints
+   a terminal frame, or structured JSON with `--json`. It exits with code `0`
+   if at least one server's metrics request succeeded, otherwise `1`. In a live
+   terminal, `app.js` starts a `Poller` for each server and sets up keyboard and
+   resize handlers.
+3. **Fetch server data.** `client.js` requests `/metrics`, using a Bearer header
+   when a key is configured and a default timeout of 4 seconds. If metrics fail,
+   the poll returns an error payload and skips `/health`. If metrics succeed,
+   it requests `/health` with a 6-second timeout; a health failure leaves health
+   data empty without discarding the metrics. Each live poller runs immediately,
+   then at its server's refresh interval. A tick is skipped while that server's
+   previous poll is still running, including when you press space to refresh.
+4. **Turn payloads into a view.** Each completed poll replaces that server's
+   stored payload and triggers a redraw. `derive.js` extracts display values
+   such as speed, GPU usage, memory, and context from the payload. Failed polls
+   display an error; otherwise queued work takes priority over the reported live
+   state. `render.js` builds panels or compact rows to fit the terminal, using
+   `format.js` for numbers, gauges, colors, and ASCII fallback, and `mascot.js`
+   for the animated face.
+5. **Keep the live view responsive.** A separate 125 ms clock redraws the latest
+   stored data and advances the animation without making network requests.
+   Keyboard changes and terminal resizes also redraw the view. Display changes
+   stay in memory for the session. On `q`, Ctrl-C, or a termination signal,
+   the app clears its timers, restores terminal input mode and cursor visibility,
+   leaves the alternate screen when used, and exits.
+
+### Terminal redraws
+
+Each frame homes the cursor, rewrites every line, and erases
+whatever is left below the last one, so toggling `c` for compact mode or
+shrinking the terminal never leaves rows of the previous frame behind. The
+screen is cleared once on entry, not per frame, so the display doesn't flicker
+while the mascot animates. That entry switch uses the alternate screen so your
+scrollback survives the session, and is skipped when `TERM` doesn't advertise
+one — there the frame draws inline instead of landing on a screen nothing paints.
+
+## Usage
+
+### Quick start
 
 ```bash
-npm install      # nothing to fetch; run straight from the repo
+# Requires Node.js 24 or newer; no install needed to run the CLI
 node bin/strata.js
 ```
 
 or `npm start`. With no config file it watches `http://127.0.0.1:8080` with no
-key, exactly like the widget's first run.
+key.
 
 One snapshot instead of the live view (works over SSH pipes and in CI):
 
@@ -46,10 +112,12 @@ node bin/strata.js --once
 node bin/strata.js --once --json | jq '.[0].metrics.live'
 ```
 
-## Config
+### Configuration
 
-`strata.json` in the working directory, `$STRATA_CONFIG`, or
-`~/.config/strata-cli/config.json` — in that order. See `config.example.json`:
+Use `--config <file>` to select a file explicitly. Otherwise, the CLI searches
+`$STRATA_CONFIG`, `strata.json` in the working directory, then
+`$XDG_CONFIG_HOME/strata-cli/config.json` (defaulting to
+`~/.config/strata-cli/config.json`). See `config.example.json`:
 
 ```json
 {
@@ -80,7 +148,7 @@ node bin/strata.js --once --json | jq '.[0].metrics.live'
 A flat single-server file (`{ "url": …, "apiKey": … }`) is accepted and treated
 as one server, matching the widget's migration of old `settings.json` files.
 
-## Flags
+### Flags and keyboard controls
 
 | Flag | Effect |
 |---|---|
@@ -100,7 +168,27 @@ as one server, matching the widget's migration of old `settings.json` files.
 Keys in the live view: `q` quit · `space` refresh now · `c` compact · `d` theme ·
 `m` mascot · `1-9` focus a server · `↑`/`↓` select.
 
-**Color.** Auto paints 24-bit when `COLORTERM` says `truecolor`, 256-color names
+### Multi-GPU
+
+When `hardware.gpus[]` reports more than one GPU, the consolidated GPU %/VRAM/
+Temp/Power cards are replaced by one row per GPU; Speed pairs with PCIe and CPU
+with Disk. Single-GPU servers keep today's cards. PCIe stays one card — the
+payload only carries server-wide PCIe fields (see issue #4 for per-GPU PCIe).
+
+```
+│   Speed  54.4 t/s ▁▂▃▆█▇▄▂▁▁      PCIe   Gen3 x16 · … ▁▁▁▁▁▁▁▁▁▁                       │
+│   GPU 0  Tesla P40                 ░░░░░░░░  0% · 21.9/23 GB · 62 °C · 52 W · Gen3 x16 │
+│   GPU 1  RTX 4070                  ░░░░░░░░  0% · 11.8/12 GB · 46 °C · 24 W · Gen3 x16 │
+│   CPU    0 % ▁▁▁▁▁▁▁▁▁▁           Disk   0.0 MB/s · … ▁▁▁▁▁▁▁▁▁▁                       │
+```
+
+The panel is `13 + N` rows, so a tall multi-GPU view collapses to the compact
+strip (which badges a multi-GPU server as `GPU 0% ×2`) before it would scroll.
+Boxes span the full terminal width.
+
+### Colors
+
+Auto paints 24-bit when `COLORTERM` says `truecolor`, 256-color names
 when `TERM` says `256color`, and the 8 ANSI names otherwise. The last case
 matters: quantizing the lime accent `#b8f36b` to the nearest 256-color slot
 lands on yellow, so on a plain terminal (Alpine's tty, `TERM=linux`) the accent
@@ -118,7 +206,9 @@ and status keeps its recognizable red/green/yellow (`91/92/93`). Borders are
 painted in the border color everywhere, rather than inheriting whatever color
 the row happened to use.
 
-**Glyphs.** The box drawing, block sparklines and mascot are Unicode. Auto
+### Glyphs and ASCII fallback
+
+The box drawing, block sparklines and mascot are Unicode. Auto
 detects a terminal that can't render them — no UTF-8 locale (`LANG=C` over ssh),
 `TERM=dumb`, `unknown` or `linux` (the kernel console's cp437 font has no
 half-blocks) — and replaces every glyph with a same-width ASCII twin: boxes
@@ -153,6 +243,8 @@ ASCII set, which is what `TERM=linux` and any non-UTF-8 shell sees:
 q quit . space refresh . c compact . d theme . m mascot . 1-9 focus . ^/v select
 ```
 
+### Troubleshooting
+
 **Blank screen?** Three things can hide the frame, in the order they are usually
 the culprit:
 
@@ -177,49 +269,22 @@ light` helps on a white-backed terminal, and `--color never` removes color from
 the comparison entirely. The ASCII gauges and sparkline scale are legible even
 with color off.
 
-**Redrawing.** Each frame homes the cursor, rewrites every line, and erases
-whatever is left below the last one, so toggling `c` for compact mode or
-shrinking the terminal never leaves rows of the previous frame behind. The
-screen is cleared once on entry, not per frame, so the widget doesn't flicker
-while the mascot animates. That entry switch uses the alternate screen so your
-scrollback survives the session, and is skipped when `TERM` doesn't advertise
-one — there the frame draws inline instead of landing on a screen nothing paints.
+## Development
 
-## What it reuses from the widget
+### Working on a change
 
-| Widget | Here |
-|---|---|
-| `electron/main.js` `request()` / `pollOnce()` | `strata-cli/client.js` — `GET /metrics` then `GET /health`, Bearer auth, 4s/6s timeouts, `{ ok, status, metrics, health, auth }` payload |
-| `main.js` `trayStateFor()` | `client.js` `stateOf()` — queued outranks `live.state`, a failed poll is `error` |
-| `renderer/renderer.js` cards + formatting | `strata-cli/derive.js` — same speed/prefill pairing, per-GPU lines, VRAM/temp/power/PCIe/CPU/disk, context fraction, expert cache, RAM |
-| `renderer/styles.css` palette | `strata-cli/format.js` `PALETTES` — same greens, ambers, reds for light and dark |
-| SVG sparklines / donut / progress bars | `format.js` `spark()` / `bar()` block glyphs |
-| Compact tab-bar strip | `--compact` one-line-per-server strip |
-| Codex-style tray dot | the animated blob's face and the `●` state tag |
+1. Start a feature or fix branch from `development`.
+2. Install the locked development tools with `npm ci`.
+3. Make the change and run `npm run check` and `npm test`.
+4. For display or polling changes, also check the CLI against a Strata server
+   using the command below.
+5. Open a pull request into `development`. Use Conventional Commit messages,
+   including the final commit message when squash-merging, so release tooling
+   can determine the version later.
+6. When ready to release, merge the tested changes into `master`. The release
+   workflow runs after CI passes; see [Releases](#releases) for branch setup.
 
-Two deliberate departures from the widget: polls never overlap (a tick that is
-still in flight is skipped, instead of queueing fetches against a slow server),
-and the config file is the source of truth rather than a settings overlay.
-
-## Multi-GPU
-
-When `hardware.gpus[]` reports more than one GPU, the consolidated GPU %/VRAM/
-Temp/Power cards are replaced by one row per GPU; Speed pairs with PCIe and CPU
-with Disk. Single-GPU servers keep today's cards. PCIe stays one card — the
-payload only carries server-wide PCIe fields (see issue #4 for per-GPU PCIe).
-
-```
-│   Speed  54.4 t/s ▁▂▃▆█▇▄▂▁▁      PCIe   Gen3 x16 · … ▁▁▁▁▁▁▁▁▁▁                       │
-│   GPU 0  Tesla P40                 ░░░░░░░░  0% · 21.9/23 GB · 62 °C · 52 W · Gen3 x16 │
-│   GPU 1  RTX 4070                  ░░░░░░░░  0% · 11.8/12 GB · 46 °C · 24 W · Gen3 x16 │
-│   CPU    0 % ▁▁▁▁▁▁▁▁▁▁           Disk   0.0 MB/s · … ▁▁▁▁▁▁▁▁▁▁                       │
-```
-
-The panel is `13 + N` rows, so a tall multi-GPU view collapses to the compact
-strip (which badges a multi-GPU server as `GPU 0% ×2`) before it would scroll.
-Boxes span the full terminal width.
-
-## Layout
+### Project layout
 
 ```
 bin/strata.js          argument parsing, --once / --json, entry point
@@ -233,7 +298,7 @@ strata-cli/app.js      animation clock, key handling, screen setup
 test/                  geometry + config assertions against the widget's fixture
 ```
 
-## Test
+### Validation
 
 ```bash
 npm run check   # syntax check every source file
@@ -257,3 +322,71 @@ Against a live server:
 ```bash
 node bin/strata.js --server http://<host>:8080 --key <key> --interval 1s
 ```
+
+## Releases
+
+Releases use GitHub Actions and semantic-release, following the setup in
+[Quickbook-Invoice-Status](https://github.com/AlohaOnline/Quickbook-Invoice-Status).
+Only pushes or merges to `master` can produce a release, after CI passes.
+The CLI is not published to npm, and the workflow does not deploy a server.
+
+### Workflow
+
+1. [ci.yml](.github/workflows/ci.yml) runs for pushes to `development` or
+   `master`, and pull requests targeting either branch. It installs Node
+   `24.22.1`, restores dependencies with `npm ci`, runs syntax checks with
+   `npm run check`, and runs the assertions with `npm test`.
+2. [release.yml](.github/workflows/release.yml) listens for the completion of
+   `CI` on `master` through `workflow_run`. Its job runs only when CI succeeded,
+   the original event was a push, and the source repository is this repository.
+   Merging a pull request produces a push to `master`, so it follows the same
+   path. Pull request checks and pushes to `development` cannot release.
+3. The release job checks out the exact commit SHA that passed CI and fetches
+   the full Git history and tags. It installs dependencies, then runs
+   `npm run release`, which invokes `semantic-release` from `package.json`.
+   It explicitly sets `GITHUB_REF` to `refs/heads/master` and `GITHUB_SHA` to
+   the checked commit because `workflow_run` otherwise uses the default branch
+   context.
+4. [.releaserc.json](.releaserc.json) restricts releases to `master`. Its plugins
+   analyze commits since the last release tag, choose a version, generate release
+   notes, update the two package files without publishing to npm, commit those
+   files, and publish a GitHub release and version tag such as `v1.2.3`.
+
+The release commit uses `chore(release): <version> [skip ci]`, so its version
+update does not start another CI/release cycle. The release concurrency group
+allows only one release job to run at a time and does not cancel an active
+release when another run arrives.
+
+### Versioning
+
+Use Conventional Commit messages for commits that reach `master`:
+
+| Commit message | Release |
+|---|---|
+| `fix: correct compact output` | Patch, e.g. `1.2.3` → `1.2.4` |
+| `feat: add a new view` | Minor, e.g. `1.2.3` → `1.3.0` |
+| A parsed commit with a `BREAKING CHANGE:` or `BREAKING CHANGES:` footer | Major, e.g. `1.2.3` → `2.0.0` |
+| `docs:`, `refactor:`, `style:`, `test:`, or `chore:` | Patch, by this repo's custom rules |
+| Other messages without a release rule or breaking-change footer | No release |
+
+When several commits qualify, the highest release level wins. If none qualify,
+the workflow succeeds without creating a release. With no existing release tags,
+the first qualifying release is `v1.0.0`; subsequent versions come from release
+tags rather than the current `package.json` version alone. When squash-merging,
+give the final squash commit a Conventional Commit message because the original
+individual commit messages will not be on `master`.
+
+### Branch setup and permissions
+
+The workflow uses the built-in `GITHUB_TOKEN`; no extra secrets are needed.
+The release job requests write access to repository contents, issues, and pull
+requests so semantic-release can publish releases and update linked items.
+Repository rules must allow GitHub Actions to push the version update to
+`master`.
+
+`master` does not need to exist when these files are added. First merge the
+workflows and release configuration into `development`, the repository's default
+branch: GitHub requires the release workflow there for `workflow_run` events.
+Then create `master` from a commit containing the same workflow files and release
+tooling. Its initial push and future pushes or merges run CI and, if qualifying
+commits exist, release automatically.
