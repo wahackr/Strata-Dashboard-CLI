@@ -4,7 +4,7 @@
 const { load } = require("./config.js");
 const { Poller } = require("./client.js");
 const { render } = require("./render.js");
-const { colorMode } = require("./format.js");
+const { colorMode, asciiMode } = require("./format.js");
 
 const FRAME_MS = 125; // 8 fps animation cadence
 const UP = "\x1b[A";
@@ -22,6 +22,8 @@ function start(options = {}) {
     // A mode string, not a boolean: paint() picks 24-bit or the named ANSI
     // colors depending on what this terminal advertises.
     color: colorMode(options.color, process.env, tty),
+    // ASCII glyphs when the terminal cannot render UTF-8 box drawing.
+    ascii: asciiMode(options.ascii, process.env),
     tick: 0,
     focus: 0,
   };
@@ -32,6 +34,10 @@ function start(options = {}) {
 
   const out = process.stdout;
   const stdin = tty ? process.stdin : null;
+  // The alternate screen keeps the user's scrollback, but a terminal that does
+  // not advertise it (TERM=dumb/unknown over a raw ssh transport) leaves the
+  // escape sequences unconsumed and the screen blank. Draw inline there.
+  const altScreen = !/dumb|unknown/i.test(String(process.env.TERM || ""));
 
   function draw() {
     const height = tty ? (process.stdout.rows || 24) : 24;
@@ -41,6 +47,7 @@ function start(options = {}) {
     entries.forEach((entry, i) => { entry.focused = i === state.focus; });
     const lines = render({
       entries, width, height, theme: state.theme, color: state.color,
+      ascii: state.ascii,
       compact: state.compact, mascot: state.mascot, tick: state.tick,
       configSource: cfg.source, refreshMs: entries[state.focus]?.server.refreshMs ?? cfg.servers[0].refreshMs,
       warnings: cfg.warnings,
@@ -79,13 +86,16 @@ function start(options = {}) {
     if (tty) {
       stdin?.setRawMode?.(false);
       stdin?.pause();
-      out.write("\x1b[?25h\x1b[?1049l");
+      out.write(altScreen ? "\x1b[?25h\x1b[?1049l" : "\x1b[?25h");
     }
     process.exit(code);
   }
 
   if (tty) {
-    out.write("\x1b[?1049h\x1b[?25l\x1b[2J"); // alternate screen, hide cursor
+    // Alternate screen and hide the cursor. A terminal that does not advertise
+    // 1049 ignores the switch, so the frame would land on a screen nothing
+    // paints: draw inline there and leave the clear to the per-line \x1b[K.
+    out.write(altScreen ? "\x1b[?1049h\x1b[?25l\x1b[2J" : "\x1b[?25l");
     stdin.setRawMode?.(true);
     stdin.resume();
     stdin.on("data", onKey);

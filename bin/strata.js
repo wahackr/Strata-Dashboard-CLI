@@ -3,7 +3,7 @@
 const { load, normalizeUrl, ConfigError } = require("../strata-cli/config.js");
 const { poll, stateOf } = require("../strata-cli/client.js");
 const { render } = require("../strata-cli/render.js");
-const { colorMode, COLOR_MODES } = require("../strata-cli/format.js");
+const { colorMode, COLOR_MODES, asciiMode } = require("../strata-cli/format.js");
 
 const USAGE = `strata — live monitor for Strata inference servers
 
@@ -23,6 +23,8 @@ Options
   --no-mascot          draw the panels without the animated blob
   --color [mode]       auto|16|256|truecolor|never; force a palette depth
   --no-color           plain text, no ANSI
+  --ascii              ASCII glyphs (+, -, |, @) for terminals without UTF-8
+  --no-ascii           force the Unicode set (--utf8 is the same flag)
   --once               poll each server once, print, and exit
   --json               with --once, print raw payloads instead of the panel
   --help               this help
@@ -35,6 +37,13 @@ Color
   says 256color, and the 8 ANSI names otherwise, so the accent stays green on
   plain terminals (Alpine's tty, TERM=linux) instead of quantizing to yellow.
   Pipes are plain unless FORCE_COLOR is set; NO_COLOR turns color off.
+
+Glyphs
+  Auto draws the Unicode box and block glyphs, and swaps every one for a
+  same-width ASCII twin when the terminal cannot render UTF-8: no UTF-8 locale
+  (LANG=C over ssh), TERM=dumb/unknown/linux, or STRATA_ASCII=1. --ascii and
+  STRATA_ASCII=0 decide outright. Substitution keeps one glyph per cell, so the
+  box still lines up.
 
 Config file (JSON)
   {
@@ -49,7 +58,7 @@ Config file (JSON)
 `;
 
 function parseArgs(argv) {
-  const opts = { servers: [], color: undefined, mascot: undefined, compact: undefined };
+  const opts = { servers: [], color: undefined, mascot: undefined, compact: undefined, ascii: undefined };
   // i is the index of the value itself: callers advance with `++i`. Reading
   // argv[i + 1] here takes the argument of the *next* flag and silently skips
   // the real one, so `--server http://x:1 --once` watched "http://--once".
@@ -92,7 +101,9 @@ function parseArgs(argv) {
       // `--color --compact` must not eat the next flag.
       const v = argv[i + 1];
       if (COLOR_MODES.includes(v)) { opts.color = v; i += 1; } else opts.color = true;
-    } else if (a === "--once") opts.once = true;
+    } else if (a === "--ascii") opts.ascii = true;
+    else if (a === "--no-ascii" || a === "--utf8") opts.ascii = false;
+    else if (a === "--once") opts.once = true;
     else if (a === "--json") opts.json = true;
     else throw new ConfigError(`unknown option ${a}`);
   }
@@ -136,6 +147,9 @@ async function runOnce(cfg, opts) {
     // environment, so a pipe yields plain text and a plain terminal gets
     // ANSI names rather than 24-bit codes it cannot render.
     color: colorMode(opts.color, process.env, Boolean(process.stdout.isTTY)),
+    // The snapshot is the SSH-pipe and CI path, which is exactly where a
+    // non-UTF-8 terminal shows up, so resolve the glyph mode the same way.
+    ascii: asciiMode(opts.ascii, process.env),
     compact: opts.compact ?? cfg.compact, mascot: opts.mascot ?? cfg.mascot,
     tick: 0, configSource: cfg.source, refreshMs: cfg.servers[0].refreshMs, warnings: cfg.warnings,
   });

@@ -7,7 +7,7 @@ const path = require("node:path");
 const f = require("../strata-cli/format.js");
 const mascot = require("../strata-cli/mascot.js");
 const { derive } = require("../strata-cli/derive.js");
-const { render } = require("../strata-cli/render.js");
+const { render, panelRows, shortGpuName, PANEL_ROWS } = require("../strata-cli/render.js");
 const { stateOf } = require("../strata-cli/client.js");
 
 const metrics = JSON.parse(fs.readFileSync(path.join(__dirname, "metrics.json"), "utf8"));
@@ -64,14 +64,25 @@ assert.equal(f.width(f.paint("abc", "#b8f36b", true)), 3, "color codes are not c
 // Quantizing #b8f36b by nearest neighbour lands on yellow (hue ~86°), which is
 // exactly the bug on Alpine's tty / TERM=linux, so the codes are by meaning.
 assert.equal(f.paint("tok", "#b8f36b", "16"), "\x1b[92mtok\x1b[39m", "dark accent is bright green at 16 colors");
-assert.equal(f.paint("tok", "#b8f36b", "256"), "\x1b[10mtok\x1b[39m", "dark accent is bright green at 256 colors");
+assert.equal(f.paint("tok", "#b8f36b", "256"), "\x1b[38;5;10mtok\x1b[39m", "dark accent is bright green at 256 colors");
 assert.equal(f.paint("tok", "#3f7d16", "16"), "\x1b[32mtok\x1b[39m", "light accent is green at 16 colors");
 assert.ok(!f.paint("tok", "#b8f36b", "16").includes("38;2;"), "16-color mode emits no 24-bit codes");
 assert.equal(f.paint("tok", "#b8f36b", false), "tok", "off is the identity");
 assert.equal(f.width(f.paint("tok", "#b8f36b", "16")), 3, "named codes are stripped for width too");
+// Every escape paint() emits has to be a foreground verb. A bare SGR number is
+// a different verb: 8 conceals, 10 sets the background, 15 is not a color at
+// all — and paint() closes with 39, which resets only the foreground, so a
+// concealed frame never un-conceals. That is what made the screen look empty on
+// a TERM=*256color terminal with no COLORTERM.
+const FOREGROUND = /^\x1b\[(3[0-7]|9[0-7]|38;(5|2);[\d;]+|22|39)m$/;
 for (const theme of Object.keys(f.PALETTES)) {
   for (const [role, hex] of Object.entries(f.PALETTES[theme])) {
     assert.match(f.paint("x", hex, "16"), /^\x1b\[\d+m/, `${theme}.${role} has a named color for plain terminals`);
+    for (const mode of ["16", "256", "truecolor"]) {
+      for (const code of f.paint("x", hex, mode).match(/\x1b\[[0-9;]*m/g)) {
+        assert.ok(FOREGROUND.test(code), `${theme}.${role} at ${mode} paints ${JSON.stringify(code)}, not a foreground`);
+      }
+    }
   }
 }
 
@@ -117,11 +128,36 @@ assert.ok(lines.some((l) => l.includes("Server not reachable")), "offline server
 assert.ok(lines.some((l) => l.includes("● generating") || l.includes("● idle") || l.includes("● reading")), "state tag drawn");
 assert.ok(lines.some((l) => l.includes("Ctx")), "context card drawn");
 assert.ok(lines.some((l) => l.includes("Strata CLI")), "header drawn");
+// The blank-screen report was 256-color mode emitting bare palette indices,
+// which are conceal (8) and background (10) rather than foreground colors.
+const painted = render({ entries, width, height: 40, theme: "dark", color: "256", mascot: true, tick: 3 });
+assert.ok(painted.every((l) => !/\x1b\[(8|10|11|15)m/.test(l)), "a 256-color frame conceals nothing");
+assert.ok(painted.some((l) => l.includes("\x1b[38;5;")), "the 256-color frame paints indexed foregrounds");
+assert.equal(painted.length, lines.length, "color changes no geometry");
+painted.forEach((l, i) => assert.equal(f.width(l), f.width(lines[i]), `painted row ${i} keeps its cell count`));
 
 // Compact mode: exactly one line per server between header and help.
 const compact = render({ entries, width, height: 40, theme: "dark", color: false, compact: true, tick: 1 });
 assert.equal(compact.length, entries.length + 2, "compact strip is one line per server");
 for (const line of compact) assert.ok(f.width(line) <= width, `compact line fits: ${JSON.stringify(line)}`);
+
+// ---- ASCII fallback ----
+// A terminal without UTF-8 gets the same frame in ASCII twins. Each glyph maps
+// to exactly one cell, so the geometry is unchanged and nothing above U+007F
+// survives to be drawn as mojibake — the "all black screen" report.
+const asciiFrame = render({ entries, width, height: 40, theme: "dark", color: false, ascii: true, mascot: true, tick: 3 });
+assert.equal(asciiFrame.length, lines.length, "ascii frame keeps the same shape");
+asciiFrame.forEach((l, i) => assert.equal(f.width(l), f.width(lines[i]), `ascii row ${i} keeps its cell count`));
+assert.ok(asciiFrame.every((l) => !/[^\x00-\x7F]/.test(l)), "every glyph has an ASCII twin");
+const asciiStrip = render({ entries, width, height: 40, theme: "dark", color: false, ascii: true, compact: true, tick: 1 });
+assert.ok(asciiStrip.every((l) => !/[^\x00-\x7F]/.test(l)), "the compact strip is ascii too");
+assert.equal(f.asciiMode(true, {}), true, "--ascii beats the environment");
+assert.equal(f.asciiMode(false, { TERM: "dumb" }), false, "--no-ascii beats the environment");
+assert.equal(f.asciiMode(undefined, { LANG: "en_US.UTF-8", TERM: "xterm-256color" }), false, "a UTF-8 terminal keeps the glyphs");
+assert.equal(f.asciiMode(undefined, { LANG: "C", TERM: "xterm-256color" }), true, "LANG=C falls back to ascii");
+assert.equal(f.asciiMode(undefined, { LANG: "en_US.UTF-8", TERM: "linux" }), true, "the kernel console falls back");
+assert.equal(f.asciiMode(undefined, { LANG: "C", STRATA_ASCII: "0" }), false, "STRATA_ASCII=0 opts out of ascii");
+assert.equal(f.asciiMode(undefined, { LANG: "en_US.UTF-8", STRATA_ASCII: "1" }), true, "STRATA_ASCII=1 opts in");
 
 // Regression: switching to compact crashed on a generating server because
 // derive() returns speed as a number and pad() counts cells on a string.
@@ -153,4 +189,83 @@ for (let i = 0; i < colored.length; i++) {
 const narrow = render({ entries, width: 40, height: 40, theme: "dark", color: false, compact: true, tick: 0 });
 assert.ok(narrow.length > 0 && narrow.every((l) => f.width(l) <= 48), "narrow terminal clamps gracefully");
 
-console.log("derived metrics, sparkline and bar geometry, mascot frames, and full/compact layout OK");
+// ---- multi-GPU (issue #4) ----
+// Mirrors the verified live payload: Tesla P40 + RTX 4070, aggregate fields
+// present, no per-GPU PCIe yet.
+const multi = {
+  live: { state: "idle" },
+  engine: { max_context: 131072 },
+  hardware: {
+    gpu_util: 0, gpu_mem_used: 35887251456, gpu_mem_total: 37037801472,
+    gpu_temp: 52, gpu_power: 85.94, gpu_power_limit: 450,
+    gpu_pcie_gen: 3, gpu_pcie_gen_max: 3, gpu_pcie_width: 16,
+    gpu_pcie_rx_mb: 0.285, cpu: 12, disk_read_mb: 41.2,
+    gpus: [
+      { index: 0, name: "Tesla P40", util: 0, mem_used: 23487971328, mem_total: 24159191040, temp: 52, power: 56.547 },
+      { index: 1, name: "NVIDIA GeForce RTX 4070", util: 0, mem_used: 12399280128, mem_total: 12878610432, temp: 41, power: 29.391 },
+    ],
+  },
+  hardware_static: { gpu_count: 2 },
+  history: { gpu_util: [0, 0], tok_s: [] },
+  requests: [],
+};
+const md = derive(ok(multi));
+assert.equal(md.gpus.length, 2, "per-GPU breakdown derived when more than one GPU");
+assert.equal(md.gpus[0].name, "Tesla P40");
+assert.equal(md.gpus[1].memTotal, 12878610432, "per-GPU mem_total read");
+assert.equal(shortGpuName("NVIDIA GeForce RTX 4070"), "RTX 4070", "vendor prefix trimmed");
+assert.equal(shortGpuName("Tesla P40"), "Tesla P40", "short names kept");
+assert.equal(derive(ok({ hardware: { gpus: [{ index: 0, name: "A", util: 5 }] } })).gpus.length, 0,
+  "one GPU stays on the consolidated cards");
+
+const gpuEntries = [{ server: servers[0], payload: ok(multi) }];
+const gpuPanel = render({ entries: gpuEntries, width: 100, height: 40, theme: "dark", color: false, tick: 0 });
+assert.ok(gpuPanel.some((l) => l.includes("GPU 0") && l.includes("Tesla P40")), "GPU 0 row drawn");
+assert.ok(gpuPanel.some((l) => l.includes("GPU 1") && l.includes("RTX 4070")), "GPU 1 row drawn with short name");
+assert.ok(!gpuPanel.some((l) => l.includes(" VRAM")), "consolidated VRAM card replaced by rows");
+assert.ok(!gpuPanel.some((l) => l.includes(" Temp")), "consolidated Temp card replaced by rows");
+assert.ok(gpuPanel.some((l) => l.includes("PCIe")), "PCIe card kept (server-wide in this payload)");
+for (const line of gpuPanel) assert.ok(f.width(line) <= 100, `multi-GPU line fits: ${JSON.stringify(line)}`);
+// The util bar must not eat the value tail: power and per-slot PCIe have to
+// survive at common widths, not truncate away.
+assert.ok(gpuPanel.some((l) => l.includes("57 W")) && gpuPanel.some((l) => l.includes("29 W")), "per-GPU power drawn in full");
+const withPcie = ok({ ...multi, hardware: { ...multi.hardware,
+  gpus: multi.hardware.gpus.map((g) => ({ ...g, pcie_gen: 4, pcie_width: g.index === 0 ? 16 : 8 })) } });
+const pciePanel = render({ entries: [{ server: servers[0], payload: withPcie }], width: 100, height: 40, theme: "dark", color: false, tick: 0 });
+assert.ok(pciePanel.some((l) => l.includes("Gen4 x16")), "per-GPU PCIe renders when the payload carries it");
+assert.ok(pciePanel.some((l) => l.includes("Gen4 x8")), "second GPU gets its own PCIe slot");
+assert.ok(pciePanel.every((l) => f.width(l) <= 100), "per-GPU PCIe lines still fit");
+assert.equal(panelRows(ok(multi)), 15, "2-GPU panel is 13 + N rows");
+assert.equal(gpuPanel.length, panelRows(ok(multi)) + 2, "drawn frame = header + panel + help");
+assert.equal(panelRows(ok(metrics)), PANEL_ROWS, "single-GPU panel keeps PANEL_ROWS");
+
+// The taller panel collapses earlier: 3 GPUs needs 16 rows + header + help.
+const three = ok({ ...multi, hardware: { ...multi.hardware,
+  gpus: multi.hardware.gpus.concat({ index: 2, name: "Tesla P100", util: null, mem_used: null, mem_total: null, temp: null, power: null }) } });
+assert.equal(panelRows(three), 16, "3-GPU panel height");
+const tight = render({ entries: [{ server: servers[0], payload: three }, { server: servers[1], payload: three }],
+  width: 100, height: 17, theme: "dark", color: false, tick: 0 });
+assert.equal(tight.length, 4, "auto-compact when the GPU rows would overflow (single server keeps its panel by design)");
+const threePanel = render({ entries: [{ server: servers[0], payload: three }], width: 100, height: 40, theme: "dark", color: false, tick: 0 });
+assert.ok(threePanel.some((l) => l.includes("GPU 2") && l.includes("–")), "missing per-GPU fields render as dashes");
+
+// Compact strip carries the GPU count badge.
+const gpuStrip = render({ entries: gpuEntries, width: 100, height: 40, theme: "dark", color: false, compact: true, tick: 0 });
+assert.ok(gpuStrip.some((l) => l.includes("GPU") && l.includes("×2")), "compact strip badges multiple GPUs");
+
+// Full-width box: no 120-col cap.
+const wide = render({ entries: gpuEntries, width: 200, height: 40, theme: "dark", color: false, tick: 0 });
+assert.ok(wide.some((l) => l.startsWith("╭") && f.width(l) === 200), "box spans the screen width");
+for (const line of wide) assert.ok(f.width(line) <= 200, "wide lines still fit");
+
+// The GPU rows are the glyph-densest path — the ×N badge, the – placeholders
+// for a slot with no fields, °C and the bars — so the ascii pass is checked
+// against them as well as against the single-GPU frame.
+for (const payload of [ok(multi), three, withPcie]) {
+  const frame = render({ entries: [{ server: servers[0], payload }], width: 100, height: 40, theme: "dark", color: false, ascii: true, tick: 0 });
+  assert.ok(frame.every((l) => !/[^\x00-\x7F]/.test(l)), "multi-GPU frame is fully ascii");
+}
+assert.ok(render({ entries: gpuEntries, width: 100, height: 40, theme: "dark", color: false, ascii: true, compact: true, tick: 0 })
+  .every((l) => !/[^\x00-\x7F]/.test(l)), "the ×N badge is ascii");
+
+console.log("derived metrics, sparkline and bar geometry, mascot frames, multi-GPU rows, and full/compact layout OK");

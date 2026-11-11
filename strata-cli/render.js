@@ -6,6 +6,20 @@ const mascot = require("./mascot.js");
 const { derive } = require("./derive.js");
 
 const PANEL_ROWS = 15; // lines per expanded server panel, borders included
+// A multi-GPU panel trades the four GPU cards for two card rows plus one row
+// per GPU: 13 + N. Two GPUs land back at 15, so the screen-fit math below has
+// to sum per-entry heights instead of trusting PANEL_ROWS.
+function panelRows(payload) {
+  const n = derive(payload).gpus.length;
+  return n > 0 ? 13 + n : PANEL_ROWS;
+}
+
+// GPU names arrive as marketing strings ("NVIDIA GeForce RTX 4070"); the row
+// has room for the model, not the vendor.
+function shortGpuName(name) {
+  return String(name).replace(/^NVIDIA\s+GeForce\s+/i, "")
+    .replace(/^NVIDIA\s+/i, "").trim() || String(name);
+}
 
 function top(label, iw, pal, color) {
   // Truncate before padding: a title longer than the box would otherwise push
@@ -71,26 +85,51 @@ function panel(entry, { iw, pal, color, tick, mascotOn }) {
   // fmt(), not a template literal: tok_s arrives with float noise that would
   // otherwise print as "41.200000000000004".
   const speedVal = d.speed == null ? null : f.fmt(d.speed, 1);
-  lines.push(metricRow(
-    metricCell("Speed", speedVal, "t/s", d.history.tok_s, undefined, pal, color),
-    metricCell("GPU", d.gpu, "%", d.history.gpu_util, 100, pal, color),
-    iw, pal, color,
-  ));
-  lines.push(metricRow(
-    metricCell("VRAM", d.vramUsed, d.vramTotal ? `/ ${d.vramTotal} GB` : "GB", d.history.gpu_mem_used, d.vramTotal ? Number(d.vramTotal) * 1073741824 : undefined, pal, color),
-    metricCell("Temp", d.temp, "°C", d.history.gpu_temp, 90, pal, color),
-    iw, pal, color,
-  ));
-  lines.push(metricRow(
-    metricCell("Power", d.power, "W", d.history.gpu_power, d.powerLimit ? Number(d.powerLimit) : undefined, pal, color),
-    metricCell("PCIe", d.pcie, d.pcieSub ? f.truncate(d.pcieSub, 14) : "", d.history.gpu_pcie_rx_mb, undefined, pal, color),
-    iw, pal, color,
-  ));
-  lines.push(metricRow(
-    metricCell("CPU", d.cpu, "%", d.history.cpu, 100, pal, color),
-    metricCell("Disk", d.disk, d.diskSub ? f.truncate(d.diskSub, 16) : "", d.history.disk_read_mb, undefined, pal, color),
-    iw, pal, color,
-  ));
+  const speedCell = metricCell("Speed", speedVal, "t/s", d.history.tok_s, undefined, pal, color);
+  const pcieCell = metricCell("PCIe", d.pcie, d.pcieSub ? f.truncate(d.pcieSub, 14) : "", d.history.gpu_pcie_rx_mb, undefined, pal, color);
+  const cpuCell = metricCell("CPU", d.cpu, "%", d.history.cpu, 100, pal, color);
+  const diskCell = metricCell("Disk", d.disk, d.diskSub ? f.truncate(d.diskSub, 16) : "", d.history.disk_read_mb, undefined, pal, color);
+
+  if (d.gpus.length) {
+    // The consolidated GPU/VRAM/Temp/Power cards would only repeat what the
+    // rows below say per slot, so Speed pairs with PCIe and CPU with Disk.
+    lines.push(metricRow(speedCell, pcieCell, iw));
+    const nameW = Math.min(24, Math.max(10, iw - 58));
+    const parts = d.gpus.map((g) => ({
+      g,
+      util: g.util == null ? "–" : f.truncate(`${f.fmt(g.util)}%`, 5),
+      vram: g.memUsed == null ? "–" : `${f.gb(g.memUsed)}/${g.memTotal == null ? "–" : f.gb(g.memTotal, 0)} GB`,
+      temp: g.temp == null ? "–" : `${f.fmt(g.temp)} °C`,
+      power: g.power == null ? "–" : `${f.fmt(g.power)} W`,
+      pcie: g.pcieGen ? ` · Gen${g.pcieGen}${g.pcieWidth ? ` x${g.pcieWidth}` : ""}` : "",
+    }));
+    // The bar gets whatever the value text does not need: a fixed reservation
+    // let the greedy bar push the power/PCIe tail past the inner width, and
+    // row()'s truncate cut it away at every terminal size.
+    const labelW = Math.max(...parts.map((p) => `GPU ${p.g.index}`.length));
+    const valW = Math.max(...parts.map((p) => f.width(`${p.util} · ${p.vram} · ${p.temp} · ${p.power}${p.pcie}`)));
+    const barW = Math.max(6, iw - 4 - 8 - labelW - nameW - valW); // four double-spaces
+    for (const p of parts) {
+      lines.push(row(`  ${f.paint(`GPU ${p.g.index}`, pal.muted, color)}  `
+        + `${f.pad(f.truncate(shortGpuName(p.g.name), nameW), nameW)}  `
+        + f.paint(f.bar(p.g.util == null ? 0 : p.g.util / 100, { cells: barW }), pal.accent, color)
+        + `  ${f.bold(p.util, color)} · ${p.vram} · ${p.temp} · ${p.power}${p.pcie}`, iw, pal, color));
+    }
+    lines.push(metricRow(cpuCell, diskCell, iw));
+  } else {
+    lines.push(metricRow(speedCell, metricCell("GPU", d.gpu, "%", d.history.gpu_util, 100, pal, color), iw));
+    lines.push(metricRow(
+      metricCell("VRAM", d.vramUsed, d.vramTotal ? `/ ${d.vramTotal} GB` : "GB", d.history.gpu_mem_used, d.vramTotal ? Number(d.vramTotal) * 1073741824 : undefined, pal, color),
+      metricCell("Temp", d.temp, "°C", d.history.gpu_temp, 90, pal, color),
+      iw, pal, color,
+    ));
+    lines.push(metricRow(
+      metricCell("Power", d.power, "W", d.history.gpu_power, d.powerLimit ? Number(d.powerLimit) : undefined, pal, color),
+      pcieCell,
+      iw, pal, color,
+    ));
+    lines.push(metricRow(cpuCell, diskCell, iw));
+  }
 
   const ctxPct = `${Math.round(d.ctxFrac * 100)}%`;
   const ctxBar = f.paint(f.bar(d.ctxFrac, { cells: Math.max(10, iw - 30) }), d.ctxFrac > 0.9 ? pal.bad : pal.good, color);
@@ -119,7 +158,9 @@ function stripLine(entry, { iw, pal, color, tick, mascotOn }) {
   const line = `${focused ? "▸" : " "} ${f.paint(mascot.burst(tick), pal.accent, color)} `
     + `${f.bold(f.pad(f.truncate(server.name, 14), 14), color)} ${face} `
     + `${f.paint(f.pad(f.truncate(d.state, 10), 10), pal[role], color)} `
-    + `${f.pad(speed, 5)} t/s · GPU ${f.pad(gpu, 3)}% · CTX ${f.pad(ctx, 4)} ${sp}`;
+    + `${f.pad(speed, 5)} t/s · GPU ${f.pad(gpu, 3)}%`
+    + (d.gpus.length > 1 ? ` ×${d.gpus.length}` : "")
+    + ` · CTX ${f.pad(ctx, 4)} ${sp}`;
   return f.truncate(line, iw);
 }
 
@@ -134,9 +175,9 @@ function header({ entries, theme, color, pal, tick, configSource, refreshMs, iw 
 const HELP = "q quit · space refresh · c compact · d theme · m mascot · 1-9 focus · ↑/↓ select";
 
 function render(options) {
-  const { entries, width = 80, height = 24, theme = "dark", color = true } = options;
+  const { entries, width = 80, height = 24, theme = "dark", color = true, ascii = false } = options;
   const pal = f.PALETTES[theme] || f.PALETTES.dark;
-  const iw = Math.max(48, Math.min(width, 120));
+  const iw = Math.max(48, width);
   const tick = options.tick ?? 0;
   const mascotOn = options.mascot !== false;
   const lines = [];
@@ -145,7 +186,7 @@ function render(options) {
   lines.push(header({ entries, theme, color, pal, tick, iw, configSource: options.configSource || "defaults", refreshMs: options.refreshMs || 1000 }));
 
   // Compact per server whenever the expanded panels would not fit the screen.
-  const wanted = entries.length * PANEL_ROWS + 2;
+  const wanted = entries.reduce((h, e) => h + panelRows(e.payload), 0) + 2;
   const compactAll = options.compact || wanted > height;
   for (const entry of entries) {
     if (compactAll && !(entries.length === 1 && !options.compact)) lines.push(stripLine(entry, { iw, pal, color, tick, mascotOn }));
@@ -153,7 +194,9 @@ function render(options) {
   }
 
   lines.push(f.paint(f.truncate(HELP, iw), pal.muted, color));
-  return lines;
+  // One pass over the finished frame: every non-ASCII glyph in the UI (borders,
+  // mascot, bars, sparklines, dots) falls back to a same-width ASCII twin.
+  return ascii ? lines.map(f.asciiize) : lines;
 }
 
-module.exports = { render, panel, stripLine, derive, PANEL_ROWS, HELP };
+module.exports = { render, panel, stripLine, derive, PANEL_ROWS, panelRows, shortGpuName, HELP };

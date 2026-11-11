@@ -6,24 +6,28 @@ draws in its Electron window, rendered in your shell, for as many servers as you
 point at. No dependencies: Node 24 and ANSI only.
 
 ```
-✳ Strata CLI  ·  2 servers  ·  refresh 1.0s  ·  theme dark  ·  ./strata.json
-╭─ ▸ ✳ Home · ● generating 12ms ─────────────────────────────────────────────╮
-│ http://127.0.0.1:8080  ·  qwen3.8-flash-next-gyro-gyro-m                    │
-│      ✳  ·  ✳        ● srv-1 ● generating                                   │
-│     ╭───────╮       Reading prompt                                         │
-│    ╱  ◕   ◕ ╲       4,200 / 13,107 tokens · 32%                            │
-│    ╲   o    ╱       ████████░░░░░░░░░░░░░░░░                               │
-│     ╰───────╯       refresh 1.0s · key env:STRATA_HOME_KEY                 │
-│  Speed 42.1 t/s ▁▂▄▆█▇▅▂▃▄   GPU  87 % ▅▆▇█▇▆▅▃▄▅                          │
-│  VRAM  13.2 / 24 GB ▃▄▅▆▇█   Temp 61 °C ▄▄▅▆▆▇▇█▇▆                          │
-│  Power 210 W ▅▆▇█▇▆▅▃         PCIe Gen5 x16 ▁▂▃▄                           │
-│  CPU   12 % ▂▃▂▄▅             Disk 41.2 MB/s ▃▄▅▆                          │
-│   Ctx  34% ████░░░░░░░░░░░░░░░░░░  44.2k / 131k                            │
-│   Cache 10,918 experts · 13.3 GB  RAM 21.4 / 31 GB ████░░░░░░              │
-│   Last  12:03:41  Done · 4.2k in / 1.1k reused / 312 out · 41.2 t/s        │
-╰────────────────────────────────────────────────────────────────────────────╯
+✴ Strata CLI  ·  1 server  ·  refresh 0.5s  ·  theme dark  ·  ./strata.json
+╭─ ▸ ✴ Home · ● idle 25ms ───────────────────────────────────────────────────────────────╮
+│ http://127.0.0.1:8080  ·  qwen3.8-flash-next                                           │
+│    z         srv-1    ● idle                                                           │
+│  ╭───────╮     Waiting for a request                                                   │
+│  ╱ ─   ─ ╲     last: 94 tokens at 54.4 tok/s                                           │
+│   ╲  ‿  ╱      ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    │
+│  ╰───────╯     refresh 0.5 s · key config                                              │
+│   Speed  54.4 t/s     ▁▁▁▁▁▁▁▁▁▁              PCIe   Gen3 x16 · 0.3 MB/s ▁▁▁▁▁▁▁▁▁▁    │
+│   GPU 0  Tesla P40                 ░░░░░░░░░░░░░░░░░░░  0% · 21.9/23 GB · 62 °C · 52 W │
+│   GPU 1  RTX 4070                  ░░░░░░░░░░░░░░░░░░░  0% · 11.8/12 GB · 46 °C · 24 W │
+│   CPU    0 %          ▁▁▁▁▁▁▁▁▁▁              Disk   0.0 MB/s ▁▁▁▁▁▁▁▁▁▁               │
+│   Ctx  52%  ███████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  66,280 / 128k│
+│   Cache 16,902 experts · 20.6 GB  RAM 48.1 / 62 GB ████████░░                          │
+│   Last 10:33:46 AM  Done · 66,186 in / 66,141 reused / 94 out · 54.4 t/s               │
+╰────────────────────────────────────────────────────────────────────────────────────────╯
 q quit · space refresh · c compact · d theme · m mascot · 1-9 focus · ↑/↓ select
 ```
+
+Two GPUs in one server, so the GPU %/VRAM/Temp/Power cards become one row per
+slot — that is the `GPU 0` / `GPU 1` pair above, and why the panel is taller
+than it used to be. See [Multi-GPU](#multi-gpu).
 
 ## Run
 
@@ -89,6 +93,7 @@ as one server, matching the widget's migration of old `settings.json` files.
 | `--compact` | one line per server, like the widget's compact strip |
 | `--no-mascot` / `--no-color` | drop the blob / drop ANSI |
 | `--color [auto\|16\|256\|truecolor\|never]` | force a palette depth |
+| `--ascii` / `--no-ascii` | force ASCII glyphs / force the Unicode glyphs (`--utf8` = `--no-ascii`) |
 | `--once` | poll each server once, print, exit |
 | `--json` | with `--once`, raw payloads for piping |
 
@@ -99,14 +104,51 @@ Keys in the live view: `q` quit · `space` refresh now · `c` compact · `d` the
 when `TERM` says `256color`, and the 8 ANSI names otherwise. The last case
 matters: quantizing the lime accent `#b8f36b` to the nearest 256-color slot
 lands on yellow, so on a plain terminal (Alpine's tty, `TERM=linux`) the accent
-is the bright-green ANSI name instead. `NO_COLOR` turns color off and
-`FORCE_COLOR` turns it on for pipes; an explicit `--color` beats both.
+is the bright-green ANSI name instead. Indexed colors are written as `38;5;n` —
+a bare palette index is a different SGR verb, where `8` conceals and `10` sets
+the background. `NO_COLOR` turns color off and `FORCE_COLOR` turns it on for
+pipes; an explicit `--color` beats both.
+
+**Glyphs.** The box drawing, block sparklines and mascot are Unicode. Auto
+detects a terminal that can't render them — no UTF-8 locale (`LANG=C` over ssh),
+`TERM=dumb`, `unknown` or `linux` (the kernel console's cp437 font has no
+half-blocks) — and replaces every glyph with a same-width ASCII twin: `+ - | > *
+. - ~ , : - = + % @`. One cell in, one cell out, so the box still lines up.
+`--ascii` forces the fallback, `--no-ascii` forces Unicode, and `STRATA_ASCII=1`
+/ `STRATA_ASCII=0` do the same for shells you can't pass flags to. The multi-GPU
+rows from the section below, rendered `--ascii`:
+
+```
+|   Speed  51.4 t/s     +++*@@@%@,             PCIe   Gen3 x16 . ~ ,,,,,,,,,,          |
+|   GPU 0  Tesla P40                 .................  0% . 21.9/23 GB . 63 C  . 60 W |
+|   GPU 1  RTX 4070                  .................  0% . 11.8/12 GB . 47 C  . 42 W |
+```
+
+**Blank screen?** Three things can hide the frame, in the order they are usually
+the culprit:
+
+- **Colors.** When literally nothing shows, borders included, that is conceal
+  rather than a dark theme. Test with `--color never`: if the frame appears, the
+  terminal is mishandling your color codes. Indexed colors must be `38;5;n` — a
+  bare palette index is conceal (`8`) or background (`10`) — and `--color 16`
+  falls back to the eight ANSI names.
+- **Glyphs.** Box drawing and the block sparklines arriving as `â”€` or `?` mean
+  the terminal is not on a UTF-8 locale. Auto detects this; `--ascii` forces it
+  and `STRATA_ASCII=1` sets it for a shell you cannot pass flags to.
+- **No alternate screen.** `TERM=dumb` or `unknown` ignores the screen switch, so
+  the frame is drawn inline instead — which overwrites the lines below it rather
+  than clearing your scrollback.
+
+`--once` sidesteps all three: no screen switch, no cursor movement, one plain
+frame you can redirect.
 
 **Redrawing.** Each frame homes the cursor, rewrites every line, and erases
 whatever is left below the last one, so toggling `c` for compact mode or
 shrinking the terminal never leaves rows of the previous frame behind. The
 screen is cleared once on entry, not per frame, so the widget doesn't flicker
-while the mascot animates.
+while the mascot animates. That entry switch uses the alternate screen so your
+scrollback survives the session, and is skipped when `TERM` doesn't advertise
+one — there the frame draws inline instead of landing on a screen nothing paints.
 
 ## What it reuses from the widget
 
@@ -124,6 +166,24 @@ Two deliberate departures from the widget: polls never overlap (a tick that is
 still in flight is skipped, instead of queueing fetches against a slow server),
 and the config file is the source of truth rather than a settings overlay.
 
+## Multi-GPU
+
+When `hardware.gpus[]` reports more than one GPU, the consolidated GPU %/VRAM/
+Temp/Power cards are replaced by one row per GPU; Speed pairs with PCIe and CPU
+with Disk. Single-GPU servers keep today's cards. PCIe stays one card — the
+payload only carries server-wide PCIe fields (see issue #4 for per-GPU PCIe).
+
+```
+│   Speed  54.4 t/s     ▁▁▁▁▁▁▁▁▁▁              PCIe   Gen3 x16 · 0.3 MB/s ▁▁▁▁▁▁▁▁▁▁    │
+│   GPU 0  Tesla P40                 ░░░░░░░░░░░░░░░░░░░  0% · 21.9/23 GB · 62 °C · 52 W │
+│   GPU 1  RTX 4070                  ░░░░░░░░░░░░░░░░░░░  0% · 11.8/12 GB · 46 °C · 24 W │
+│   CPU    0 %          ▁▁▁▁▁▁▁▁▁▁              Disk   0.0 MB/s ▁▁▁▁▁▁▁▁▁▁               │
+```
+
+The panel is `13 + N` rows, so a tall multi-GPU view collapses to the compact
+strip (which badges a multi-GPU server as `GPU 0% ×2`) before it would scroll.
+Boxes span the full terminal width.
+
 ## Layout
 
 ```
@@ -131,7 +191,7 @@ bin/strata.js          argument parsing, --once / --json, entry point
 strata-cli/config.js   config discovery, credential precedence, clamping
 strata-cli/client.js   fetch + per-server poll timer (no overlapping polls)
 strata-cli/derive.js   payload -> numbers
-strata-cli/format.js   numbers, sparklines, bars, palette, ANSI widths
+strata-cli/format.js   numbers, sparklines, bars, palette, ANSI widths, ASCII glyphs
 strata-cli/mascot.js   the Claude blob: face per state, frames per tick
 strata-cli/render.js   boxes, panels, compact strips, header
 strata-cli/app.js      animation clock, key handling, screen setup
@@ -150,8 +210,12 @@ and permission warnings. `test/client.js` stubs `fetch` and asserts URL joining,
 the Bearer header, the 401/timeout/503 shapes, and that a poll never overlaps
 the one before it. `test/render.js` renders against `test/metrics.json` (copied
 from the widget's fixture) and asserts that every drawn line fits the requested
-terminal width, that color codes never change line geometry, and that every
-mascot frame is the same size. Nothing needs a server or a TTY.
+terminal width, that every escape `paint()` emits is a foreground code rather
+than conceal or background, that color and the ASCII fallback change no line
+geometry, that an ascii frame holds no byte above U+007F, and that every mascot
+frame is the same size. The multi-GPU cases check the `13 + N` row height, the
+collapse to the compact strip, and per-slot PCIe. Nothing needs a server or a
+TTY.
 
 Against a live server:
 
