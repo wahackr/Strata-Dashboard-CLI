@@ -367,13 +367,12 @@ The CLI is not published to npm, and the workflow does not deploy a server.
    context.
 4. [.releaserc.json](.releaserc.json) restricts releases to `master`. Its plugins
    analyze commits since the last release tag, choose a version, generate release
-   notes, update the two package files without publishing to npm, commit those
-   files, and publish a GitHub release and version tag such as `v1.2.3`.
+   notes, update package versions in the runner workspace without publishing to
+   npm, and publish a GitHub release and version tag such as `v1.2.3`. The tag
+   points to the commit that passed CI; no version-update commit is pushed.
 
-The release commit uses `chore(release): <version> [skip ci]`, so its version
-update does not start another CI/release cycle. The release concurrency group
-allows only one release job to run at a time and does not cancel an active
-release when another run arrives.
+The release concurrency group allows only one release job to run at a time
+and does not cancel an active release when another run arrives.
 
 ### Versioning
 
@@ -390,7 +389,9 @@ Use Conventional Commit messages for commits that reach `master`:
 When several commits qualify, the highest release level wins. If none qualify,
 the workflow succeeds without creating a release. With no existing release tags,
 the first qualifying release is `v1.0.0`; subsequent versions come from release
-tags rather than the current `package.json` version alone. When squash-merging,
+tags rather than the current `package.json` version alone. The package files
+in Git retain their checked-in version; use GitHub Releases and tags to identify
+the released version. When squash-merging,
 give the final squash commit a Conventional Commit message because the original
 individual commit messages will not be on `master`.
 
@@ -399,8 +400,9 @@ individual commit messages will not be on `master`.
 The workflow uses the built-in `GITHUB_TOKEN`; no extra secrets are needed.
 The release job requests write access to repository contents, issues, and pull
 requests so semantic-release can publish releases and update linked items.
-Repository rules must allow GitHub Actions to push the version update to
-`master`.
+The `master` branch can require pull requests and CI checks: the release job
+pushes tags and release notes, not commits to `master`. Tag rules must permit
+the release token to create version tags.
 
 `master` does not need to exist when these files are added. First merge the
 workflows and release configuration into `development`, the repository's default
