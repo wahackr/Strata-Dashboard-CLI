@@ -163,7 +163,7 @@ for (const [role, hex] of Object.entries(f.PALETTES.dark)) {
 
 // ---- mascot frames never change size ----
 for (const state of mascot.stateList()) {
-  for (const tick of [0, 1, 2, 3, 4, 7]) {
+  for (const tick of Array.from({ length: 32 }, (_, i) => i)) {
     const rows = mascot.frame(state, tick);
     assert.equal(rows.length, mascot.H, `${state} frame height is fixed`);
     for (const row of rows) assert.equal(f.width(row), mascot.W, `${state} frame width is fixed`);
@@ -171,11 +171,9 @@ for (const state of mascot.stateList()) {
 }
 assert.ok(mascot.frame("nonsense-state", 0).length === mascot.H, "unknown state falls back to idle");
 
-// The Unicode face uses ◕/◡/✕, none of which exist in the console font, so it
-// arrived as boxes on a vconsole. The ASCII face is built from ASCII only and
-// is sized cell-for-cell like the Unicode one, so the panel does not twitch.
+// The bunny stays ASCII in both terminal modes, with identical geometry.
 for (const state of mascot.stateList()) {
-  for (const tick of [0, 1, 2, 3, 4, 7]) {
+  for (const tick of Array.from({ length: 32 }, (_, i) => i)) {
     const rows = mascot.frame(state, tick, true);
     assert.equal(rows.length, mascot.H, `${state} ascii frame height is fixed`);
     for (const row of rows) {
@@ -188,13 +186,29 @@ for (const state of mascot.stateList()) {
 }
 assert.ok(!mascot.stateList().some((s) => mascot.frame(s, 0, true).join("").includes("@")), "the ascii mascot has no @");
 // The face has to be readable, not a row of identical characters: the eyes are
-// two separated marks and the mouth differs between states.
+// two separated marks; each state has its own eyes and accessory.
 for (const state of mascot.stateList()) {
   const eyes = mascot.ASCII_FACE[state].eyes;
   assert.equal(eyes.length, 5, "ascii eyes keep the unicode 5-cell width");
   assert.ok(!/^(\S)\1+$/.test(eyes), `${state} ascii eyes are two marks, not a solid bar`);
 }
-assert.notEqual(mascot.ASCII_FACE.idle.mouth, mascot.ASCII_FACE.generating.mouth, "idle and generating mouths differ");
+// Preserve the approved rounded silhouette and keep the mouth above the chin.
+assert.deepEqual(mascot.frame("generating", 0).slice(1).map((row) => row.trimEnd()), [
+  "    _   _", "   | | | |", "   | |_| |", "  /       \\",
+  " |  .   .  |", " |    x    |", "  \\_______/",
+]);
+assert.equal(new Set(mascot.stateList().map((s) => mascot.frame(s, 0).join("\n"))).size,
+  mascot.stateList().length, "all server states look distinct without color");
+const idleCycle = Array.from({ length: 16 }, (_, tick) => mascot.frame("idle", tick));
+assert.ok(idleCycle[0][5].includes("-   -"), "idle starts with sleepy eyes");
+assert.ok(idleCycle[15][5].includes(".   ."), "idle occasionally opens its eyes");
+assert.ok(idleCycle[4][0].indexOf("z") < idleCycle[8][0].indexOf("z")
+  && idleCycle[8][0].indexOf("z") < idleCycle[12][0].indexOf("z"), "idle z drifts right");
+for (const rows of idleCycle) {
+  for (const i of [1, 2, 3, 4, 6, 7]) {
+    assert.equal(rows[i], idleCycle[0][i], "ears, outline, mouth and chin stay stable while idling");
+  }
+}
 assert.ok(!/[^\x00-\x7F]/.test(mascot.inline("generating", true)), "the compact inline face is ascii");
 assert.equal(f.width(mascot.inline("generating", true)), f.width(mascot.inline("generating")), "ascii inline face keeps its width");
 
@@ -341,19 +355,39 @@ const pciePanel = render({ entries: [{ server: servers[0], payload: withPcie }],
 assert.ok(pciePanel.some((l) => l.includes("Gen4 x16")), "per-GPU PCIe renders when the payload carries it");
 assert.ok(pciePanel.some((l) => l.includes("Gen4 x8")), "second GPU gets its own PCIe slot");
 assert.ok(pciePanel.every((l) => f.width(l) <= 100), "per-GPU PCIe lines still fit");
-assert.equal(panelRows(ok(multi)), 15, "2-GPU panel is 13 + N rows");
+assert.equal(panelRows(ok(multi)), 18, "2-GPU panel is 16 + N rows");
 assert.equal(gpuPanel.length, panelRows(ok(multi)) + 2, "drawn frame = header + panel + help");
 assert.equal(panelRows(ok(metrics)), PANEL_ROWS, "single-GPU panel keeps PANEL_ROWS");
 
-// The taller panel collapses earlier: 3 GPUs needs 16 rows + header + help.
+// The taller panel collapses earlier: 3 GPUs needs 19 rows + header + help.
 const three = ok({ ...multi, hardware: { ...multi.hardware,
   gpus: multi.hardware.gpus.concat({ index: 2, name: "Tesla P100", util: null, mem_used: null, mem_total: null, temp: null, power: null }) } });
-assert.equal(panelRows(three), 16, "3-GPU panel height");
+assert.equal(panelRows(three), 19, "3-GPU panel height");
 const tight = render({ entries: [{ server: servers[0], payload: three }, { server: servers[1], payload: three }],
   width: 100, height: 17, theme: "dark", color: false, tick: 0 });
-assert.equal(tight.length, 4, "auto-compact when the GPU rows would overflow (single server keeps its panel by design)");
+assert.equal(tight.length, 4, "auto-compact when the GPU rows would overflow");
 const threePanel = render({ entries: [{ server: servers[0], payload: three }], width: 100, height: 40, theme: "dark", color: false, tick: 0 });
 assert.ok(threePanel.some((l) => l.includes("GPU 2") && l.includes("–")), "missing per-GPU fields render as dashes");
+
+// Check the exact screen-fit boundary, including a single server and warnings.
+for (const payload of [ok(metrics), ok(multi), three]) {
+  for (const mascotOn of [true, false]) {
+    const one = [{ server: servers[0], payload }];
+    const expected = panelRows(payload, mascotOn) + 2;
+    const options = { entries: one, width: 80, color: false, mascot: mascotOn };
+    const expanded = render({ ...options, height: expected });
+    assert.equal(expanded.length, expected, "panel fits at the exact height boundary");
+    assert.ok(expanded.some((l) => l.startsWith("╭")), "boundary retains expanded panel");
+    assert.ok(expanded.every((l) => f.width(l) === 80 || !l.startsWith("│")), "panel borders stay aligned");
+    assert.ok(!expanded.join("\n").includes("undefined"), "extra mascot rows have empty status text");
+    const smaller = render({ ...options, height: expected - 1 });
+    assert.equal(smaller.length, 3, "one server compacts when its panel is too tall");
+    const warned = render({ ...options, height: expected, warnings: ["example warning"] });
+    assert.equal(warned.length, 4, "warnings count toward screen height");
+    assert.equal(expanded.some((l) => l.includes("| |_| |")), mascotOn, "mascot toggle controls the bunny");
+  }
+}
+assert.equal(panelRows(ok(metrics), false), 15, "hiding the bunny restores the smaller panel");
 
 // Compact strip carries the GPU count badge.
 const gpuStrip = render({ entries: gpuEntries, width: 100, height: 40, theme: "dark", color: false, compact: true, tick: 0 });
