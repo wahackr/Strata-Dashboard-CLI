@@ -6,24 +6,28 @@ draws in its Electron window, rendered in your shell, for as many servers as you
 point at. No dependencies: Node 24 and ANSI only.
 
 ```
-✳ Strata CLI  ·  2 servers  ·  refresh 1.0s  ·  theme dark  ·  ./strata.json
-╭─ ▸ ✳ Home · ● generating 12ms ─────────────────────────────────────────────╮
-│ http://127.0.0.1:8080  ·  qwen3.8-flash-next-gyro-gyro-m                    │
-│      ✳  ·  ✳        ● srv-1 ● generating                                   │
-│     ╭───────╮       Reading prompt                                         │
-│    ╱  ◕   ◕ ╲       4,200 / 13,107 tokens · 32%                            │
-│    ╲   o    ╱       ████████░░░░░░░░░░░░░░░░                               │
-│     ╰───────╯       refresh 1.0s · key env:STRATA_HOME_KEY                 │
-│  Speed 42.1 t/s ▁▂▄▆█▇▅▂▃▄   GPU  87 % ▅▆▇█▇▆▅▃▄▅                          │
-│  VRAM  13.2 / 24 GB ▃▄▅▆▇█   Temp 61 °C ▄▄▅▆▆▇▇█▇▆                          │
-│  Power 210 W ▅▆▇█▇▆▅▃         PCIe Gen5 x16 ▁▂▃▄                           │
-│  CPU   12 % ▂▃▂▄▅             Disk 41.2 MB/s ▃▄▅▆                          │
-│   Ctx  34% ████░░░░░░░░░░░░░░░░░░  44.2k / 131k                            │
-│   Cache 10,918 experts · 13.3 GB  RAM 21.4 / 31 GB ████░░░░░░              │
-│   Last  12:03:41  Done · 4.2k in / 1.1k reused / 312 out · 41.2 t/s        │
-╰────────────────────────────────────────────────────────────────────────────╯
+✴ Strata CLI  ·  1 server  ·  refresh 0.5s  ·  theme dark  ·  ./strata.json
+╭─ ▸ ✴ Home · ● idle 25ms ───────────────────────────────────────────────────────────────╮
+│ http://127.0.0.1:8080  ·  qwen3.8-flash-next                                           │
+│    z         srv-1    ● idle                                                           │
+│  ╭───────╮     Waiting for a request                                                   │
+│  ╱ ─   ─ ╲     last: 94 tokens at 54.4 tok/s                                           │
+│   ╲  ‿  ╱      ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    │
+│  ╰───────╯     refresh 0.5 s · key config                                              │
+│   Speed  54.4 t/s     ▁▁▁▁▁▁▁▁▁▁              PCIe   Gen3 x16 · 0.3 MB/s ▁▁▁▁▁▁▁▁▁▁    │
+│   GPU 0  Tesla P40                 ░░░░░░░░░░░░░░░░░░░  0% · 21.9/23 GB · 62 °C · 52 W │
+│   GPU 1  RTX 4070                  ░░░░░░░░░░░░░░░░░░░  0% · 11.8/12 GB · 46 °C · 24 W │
+│   CPU    0 %          ▁▁▁▁▁▁▁▁▁▁              Disk   0.0 MB/s ▁▁▁▁▁▁▁▁▁▁               │
+│   Ctx  52%  ███████████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  66,280 / 128k│
+│   Cache 16,902 experts · 20.6 GB  RAM 48.1 / 62 GB ████████░░                          │
+│   Last 10:33:46 AM  Done · 66,186 in / 66,141 reused / 94 out · 54.4 t/s               │
+╰────────────────────────────────────────────────────────────────────────────────────────╯
 q quit · space refresh · c compact · d theme · m mascot · 1-9 focus · ↑/↓ select
 ```
+
+Two GPUs in one server, so the GPU %/VRAM/Temp/Power cards become one row per
+slot — that is the `GPU 0` / `GPU 1` pair above, and why the panel is taller
+than it used to be. See [Multi-GPU](#multi-gpu).
 
 ## Run
 
@@ -170,10 +174,10 @@ with Disk. Single-GPU servers keep today's cards. PCIe stays one card — the
 payload only carries server-wide PCIe fields (see issue #4 for per-GPU PCIe).
 
 ```
-│   Speed  43.2 t/s     ▁▁▁▁▁▁▁▁▁▁         PCIe   Gen3 x16 · 0.3 MB/s ▁▂▁▁▁▁    │
-│   GPU 0  Tesla P40               ░░░░░░░░░░  0% · 21.9/23 GB · 40 °C · 48 W  │
-│   GPU 1  RTX 4070                ░░░░░░░░░░  0% · 11.5/12 GB · 34 °C · 10 W  │
-│   CPU    0 %          ▁▁▁▁▁▁▁▁▁▁         Disk   0.0 MB/s                     │
+│   Speed  54.4 t/s     ▁▁▁▁▁▁▁▁▁▁              PCIe   Gen3 x16 · 0.3 MB/s ▁▁▁▁▁▁▁▁▁▁    │
+│   GPU 0  Tesla P40                 ░░░░░░░░░░░░░░░░░░░  0% · 21.9/23 GB · 62 °C · 52 W │
+│   GPU 1  RTX 4070                  ░░░░░░░░░░░░░░░░░░░  0% · 11.8/12 GB · 46 °C · 24 W │
+│   CPU    0 %          ▁▁▁▁▁▁▁▁▁▁              Disk   0.0 MB/s ▁▁▁▁▁▁▁▁▁▁               │
 ```
 
 The panel is `13 + N` rows, so a tall multi-GPU view collapses to the compact
