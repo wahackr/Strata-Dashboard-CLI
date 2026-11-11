@@ -20,7 +20,7 @@ Options
   --timeout <ms>       metrics request timeout (default: 4000; /health uses 6000)
   --theme <dark|light> color theme (default: from config, else dark)
   --compact            one line per server, like the widget's compact strip
-  --no-mascot          draw the panels without the animated blob
+  --no-mascot          draw the panels without the animated bunny
   --color [mode]       auto|16|256|truecolor|console|never; force a palette depth
   --no-color           plain text, no ANSI
   --ascii              ASCII glyphs (+, -, |, [, ]) for terminals without UTF-8

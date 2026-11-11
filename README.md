@@ -6,21 +6,24 @@ draws in its Electron window, rendered in your shell, for as many servers as you
 point at. No runtime dependencies: Node 24 and ANSI only.
 
 ```
-✷ Strata CLI  ·  1 server  ·  refresh 0.5s  ·  theme dark  ·  ./strata.json
-╭─ ▸ ✷ Home · ● idle 25ms ───────────────────────────────────────────────────────────────╮
+✴ Strata CLI  ·  1 server  ·  refresh 0.5s  ·  theme dark  ·  ./strata.json
+╭─ ▸ ✴ Home · ● idle 25ms ───────────────────────────────────────────────────────────────╮
 │ http://127.0.0.1:8080  ·  qwen3.8-flash-next                                           │
-│        z     srv-1    ● idle                                                           │
-│  ╭───────╮     Waiting for a request                                                   │
-│  ╱ ─   ─ ╲     last: 94 tokens at 54.4 tok/s                                           │
-│   ╲  ‿  ╱      ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░    │
-│  ╰───────╯     refresh 0.5 s · key config                                              │
-│   Speed  54.4 t/s ▁▂▃▆█▇▄▂▁▁      PCIe   Gen3 x16 · … ▁▁▁▁▁▁▁▁▁▁                       │
-│   GPU 0  Tesla P40                 ░░░░░░░░  0% · 21.9/23 GB · 62 °C · 52 W · Gen3 x16 │
-│   GPU 1  RTX 4070                  ░░░░░░░░  0% · 11.8/12 GB · 46 °C · 24 W · Gen3 x16 │
-│   CPU    0 % ▁▁▁▁▁▁▁▁▁▁           Disk   0.0 MB/s · … ▁▁▁▁▁▁▁▁▁▁                       │
-│   Ctx  51%  █████████████████████████░░░░░░░░░░░░░░░░░░░░░░░░  66,280 / 128k           │
-│   Cache 16,902 experts · 20.5 GB    RAM 48.1 / 62 GB     ████████░░                    │
-│   Last 01:13:46 PM  Done · 66,186 in / 66,141 reused / 94 out · 54.4 t/s               │
+│            z   srv-1    ● idle                                                         │
+│     _   _        Waiting for a request                                                 │
+│    | | | |       last: 263 tokens at 36.1 tok/s                                        │
+│    | |_| |       ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │
+│   /       \      refresh 0.5 s · key config                                            │
+│  |  -   -  |                                                                           │
+│  |    x    |                                                                           │
+│   \_______/                                                                            │
+│   Speed  36.1 t/s ▁▁▁▅▆▇██▇▇      PCIe   Gen3 x16 · … ▁▅▅▁▁▅▁▁▁▃                       │
+│   GPU 0  Tesla P40                 ░░░░░░░░░░░░░░░░░░░  0% · 21.9/23 GB · 62 °C · 52 W │
+│   GPU 1  RTX 4070                  ░░░░░░░░░░░░░░░░░░░  0% · 11.8/12 GB · 46 °C · 24 W │
+│   CPU    60 % ▁▁▁▂▅▅▅▆▅▅          Disk   105 MB/s · … ▇██▃▁▁▁▁▁▁                       │
+│   Ctx  14%  ███████░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░  18,191 / 128k           │
+│   Cache 10,918 experts · 13.3 GB    RAM 20.3 / 31 GB     ███████░░░                    │
+│   Last 04:39:58 PM  Done · 17,928 in / 15,630 reused / 263 out · 36.1 t/s              │
 ╰────────────────────────────────────────────────────────────────────────────────────────╯
 q quit · space refresh · c compact · d theme · m mascot · 1-9 focus · ↑/↓ select
 ```
@@ -159,7 +162,7 @@ as one server, matching the widget's migration of old `settings.json` files.
 | `--timeout <ms>` | metrics request timeout (`/health` always gets 6s) |
 | `--theme <dark\|light>` | theme |
 | `--compact` | one line per server, like the widget's compact strip |
-| `--no-mascot` / `--no-color` | drop the blob / drop ANSI |
+| `--no-mascot` / `--no-color` | hide the bunny / drop ANSI |
 | `--color [auto\|16\|256\|truecolor\|console\|never]` | force a palette depth |
 | `--ascii` / `--no-ascii` | force ASCII glyphs / force the Unicode glyphs (`--utf8` = `--no-ascii`) |
 | `--once` | poll each server once, print, exit |
@@ -167,6 +170,17 @@ as one server, matching the widget's migration of old `settings.json` files.
 
 Keys in the live view: `q` quit · `space` refresh now · `c` compact · `d` theme ·
 `m` mascot · `1-9` focus a server · `↑`/`↓` select.
+
+### Bunny mascot
+
+The expanded panel shows a head-only ASCII bunny beside the server status.
+Idle uses sleepy eyes, a gently drifting `z`, and occasional open eyes. Reading,
+generating, queued, and error states have distinct eyes and accessories; the
+rounded head and small `x` mouth stay fixed so animation never shifts the panel.
+The head has seven rows plus one accessory row. Hide it with `m` or
+`--no-mascot` to return to the shorter five-row status area. Panels collapse to
+compact strips when they would exceed the terminal height, including with one
+server. Compact strips keep a small face beside the state label.
 
 ### Multi-GPU
 
@@ -182,8 +196,8 @@ payload only carries server-wide PCIe fields (see issue #4 for per-GPU PCIe).
 │   CPU    0 % ▁▁▁▁▁▁▁▁▁▁           Disk   0.0 MB/s · … ▁▁▁▁▁▁▁▁▁▁                       │
 ```
 
-The panel is `13 + N` rows, so a tall multi-GPU view collapses to the compact
-strip (which badges a multi-GPU server as `GPU 0% ×2`) before it would scroll.
+With the bunny visible, the panel is `16 + N` rows, so a tall multi-GPU view
+collapses to the compact strip (which badges a multi-GPU server as `GPU 0% ×2`) before it would scroll.
 Boxes span the full terminal width.
 
 ### Colors
@@ -208,12 +222,13 @@ the row happened to use.
 
 ### Glyphs and ASCII fallback
 
-The box drawing, block sparklines and mascot are Unicode. Auto
-detects a terminal that can't render them — no UTF-8 locale (`LANG=C` over ssh),
+The bunny uses ASCII in every terminal. The box drawing and block sparklines
+use Unicode by default. Auto detects a terminal that can't render them — no
+UTF-8 locale (`LANG=C` over ssh),
 `TERM=dumb`, `unknown` or `linux` (the kernel console's cp437 font has no
 half-blocks) — and replaces every glyph with a same-width ASCII twin: boxes
-become `+ - | / \`, the state dot `*`, separators `.`, the mascot a `- o x _ ~`
-face, gauges a bracketed `[######----]` where `#` is filled and `-` is not, and
+become `+ - | / \`, the state dot `*`, separators `.`, gauges a bracketed
+`[######----]` where `#` is filled and `-` is not, and
 sparklines the seven-step scale ` .-+=*#`. One cell in, one cell out, so the box
 still lines up. Nothing fills with `@` and no gauge is a run of dots: on a
 framebuffer that lacks the half-block glyph, `█` and `░` collapse into each
@@ -227,18 +242,21 @@ ASCII set, which is what `TERM=linux` and any non-UTF-8 shell sees:
 * Strata CLI  .  1 server  .  refresh 0.5s  .  theme dark  .  ./strata.json
 +- > * Home . * idle 25ms ---------------------------------------------------------------+
 | http://127.0.0.1:8080  .  qwen3.8-flash-next                                           |
-|        z     srv-1    * idle                                                           |
-|  .-------.     Waiting for a request                                                   |
-|  | -   - |     last: 94 tokens at 54.4 tok/s                                           |
-|   |  _  |      [------------------------------------------------------------------]    |
-|  '-------'     refresh 0.5 s . key config                                              |
-|   Speed  54.4 t/s  .-+#*=.        PCIe   Gen3 x16 . ~                                  |
-|   GPU 0  Tesla P40                 [------]  0% . 21.9/23 GB . 62 C  . 52 W . Gen3 x16 |
-|   GPU 1  RTX 4070                  [------]  0% . 11.8/12 GB . 46 C  . 24 W . Gen3 x16 |
-|   CPU    0 %                      Disk   0.0 MB/s . ~                                  |
-|   Ctx  51%  [########################-----------------------]  66,280 / 128k           |
-|   Cache 16,902 experts . 20.5 GB    RAM 48.1 / 62 GB     [######--]                    |
-|   Last 01:13:46 PM  Done . 66,186 in / 66,141 reused / 94 out . 54.4 t/s               |
+|            z   srv-1    * idle                                                         |
+|     _   _        Waiting for a request                                                 |
+|    | | | |       last: 263 tokens at 36.1 tok/s                                        |
+|    | |_| |       [-------------------------------------------------------------------] |
+|   /       \      refresh 0.5 s . key config                                            |
+|  |  -   -  |                                                                           |
+|  |    x    |                                                                           |
+|   \_______/                                                                            |
+|   Speed  36.1 t/s    ++###**      PCIe   Gen3 x16 . ~ .==..=...-                       |
+|   GPU 0  Tesla P40                 [-----------------]  0% . 21.9/23 GB . 62 C  . 52 W |
+|   GPU 1  RTX 4070                  [-----------------]  0% . 11.8/12 GB . 46 C  . 24 W |
+|   CPU    60 % ....++++++          Disk   105 MB/s . ~ *##.......                       |
+|   Ctx  14%  [#######----------------------------------------]  18,191 / 128k           |
+|   Cache 10,918 experts . 13.3 GB    RAM 20.3 / 31 GB     [#####---]                    |
+|   Last 04:39:58 PM  Done . 17,928 in / 15,630 reused / 263 out . 36.1 t/s              |
 +----------------------------------------------------------------------------------------+
 q quit . space refresh . c compact . d theme . m mascot . 1-9 focus . ^/v select
 ```
@@ -292,7 +310,7 @@ strata-cli/config.js   config discovery, credential precedence, clamping
 strata-cli/client.js   fetch + per-server poll timer (no overlapping polls)
 strata-cli/derive.js   payload -> numbers
 strata-cli/format.js   numbers, sparklines, bars, palette, ANSI widths, ASCII glyphs
-strata-cli/mascot.js   the Claude blob: face per state, frames per tick
+strata-cli/mascot.js   ASCII bunny head: face per state, frames per tick
 strata-cli/render.js   boxes, panels, compact strips, header
 strata-cli/app.js      animation clock, key handling, screen setup
 test/                  geometry + config assertions against the widget's fixture
@@ -313,7 +331,7 @@ from the widget's fixture) and asserts that every drawn line fits the requested
 terminal width, that every escape `paint()` emits is a foreground code rather
 than conceal or background, that color and the ASCII fallback change no line
 geometry, that an ascii frame holds no byte above U+007F, and that every mascot
-frame is the same size. The multi-GPU cases check the `13 + N` row height, the
+frame is the same size. The multi-GPU cases check the `16 + N` row height, the
 collapse to the compact strip, and per-slot PCIe. Nothing needs a server or a
 TTY.
 
