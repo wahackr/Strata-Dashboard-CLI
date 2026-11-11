@@ -89,6 +89,7 @@ as one server, matching the widget's migration of old `settings.json` files.
 | `--compact` | one line per server, like the widget's compact strip |
 | `--no-mascot` / `--no-color` | drop the blob / drop ANSI |
 | `--color [auto\|16\|256\|truecolor\|never]` | force a palette depth |
+| `--ascii` / `--no-ascii` | force ASCII glyphs / force the Unicode glyphs (`--utf8` = `--no-ascii`) |
 | `--once` | poll each server once, print, exit |
 | `--json` | with `--once`, raw payloads for piping |
 
@@ -102,11 +103,21 @@ lands on yellow, so on a plain terminal (Alpine's tty, `TERM=linux`) the accent
 is the bright-green ANSI name instead. `NO_COLOR` turns color off and
 `FORCE_COLOR` turns it on for pipes; an explicit `--color` beats both.
 
+**Glyphs.** The box drawing, block sparklines and mascot are Unicode. Auto
+detects a terminal that can't render them — no UTF-8 locale (`LANG=C` over ssh),
+`TERM=dumb`, `unknown` or `linux` (the kernel console's cp437 font has no
+half-blocks) — and replaces every glyph with a same-width ASCII twin: `+ - | > *
+. - ~ , : - = + % @`. One cell in, one cell out, so the box still lines up.
+`--ascii` forces the fallback, `--no-ascii` forces Unicode, and `STRATA_ASCII=1`
+/ `STRATA_ASCII=0` do the same for shells you can't pass flags to.
+
 **Redrawing.** Each frame homes the cursor, rewrites every line, and erases
 whatever is left below the last one, so toggling `c` for compact mode or
 shrinking the terminal never leaves rows of the previous frame behind. The
 screen is cleared once on entry, not per frame, so the widget doesn't flicker
-while the mascot animates.
+while the mascot animates. That entry switch uses the alternate screen so your
+scrollback survives the session, and is skipped when `TERM` doesn't advertise
+one — there the frame draws inline instead of landing on a screen nothing paints.
 
 ## What it reuses from the widget
 

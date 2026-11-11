@@ -175,7 +175,7 @@ function header({ entries, theme, color, pal, tick, configSource, refreshMs, iw 
 const HELP = "q quit · space refresh · c compact · d theme · m mascot · 1-9 focus · ↑/↓ select";
 
 function render(options) {
-  const { entries, width = 80, height = 24, theme = "dark", color = true } = options;
+  const { entries, width = 80, height = 24, theme = "dark", color = true, ascii = false } = options;
   const pal = f.PALETTES[theme] || f.PALETTES.dark;
   const iw = Math.max(48, width);
   const tick = options.tick ?? 0;
@@ -194,7 +194,9 @@ function render(options) {
   }
 
   lines.push(f.paint(f.truncate(HELP, iw), pal.muted, color));
-  return lines;
+  // One pass over the finished frame: every non-ASCII glyph in the UI (borders,
+  // mascot, bars, sparklines, dots) falls back to a same-width ASCII twin.
+  return ascii ? lines.map(f.asciiize) : lines;
 }
 
 module.exports = { render, panel, stripLine, derive, PANEL_ROWS, panelRows, shortGpuName, HELP };

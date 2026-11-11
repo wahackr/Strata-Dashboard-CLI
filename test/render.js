@@ -141,6 +141,24 @@ const compact = render({ entries, width, height: 40, theme: "dark", color: false
 assert.equal(compact.length, entries.length + 2, "compact strip is one line per server");
 for (const line of compact) assert.ok(f.width(line) <= width, `compact line fits: ${JSON.stringify(line)}`);
 
+// ---- ASCII fallback ----
+// A terminal without UTF-8 gets the same frame in ASCII twins. Each glyph maps
+// to exactly one cell, so the geometry is unchanged and nothing above U+007F
+// survives to be drawn as mojibake — the "all black screen" report.
+const asciiFrame = render({ entries, width, height: 40, theme: "dark", color: false, ascii: true, mascot: true, tick: 3 });
+assert.equal(asciiFrame.length, lines.length, "ascii frame keeps the same shape");
+asciiFrame.forEach((l, i) => assert.equal(f.width(l), f.width(lines[i]), `ascii row ${i} keeps its cell count`));
+assert.ok(asciiFrame.every((l) => !/[^\x00-\x7F]/.test(l)), "every glyph has an ASCII twin");
+const asciiStrip = render({ entries, width, height: 40, theme: "dark", color: false, ascii: true, compact: true, tick: 1 });
+assert.ok(asciiStrip.every((l) => !/[^\x00-\x7F]/.test(l)), "the compact strip is ascii too");
+assert.equal(f.asciiMode(true, {}), true, "--ascii beats the environment");
+assert.equal(f.asciiMode(false, { TERM: "dumb" }), false, "--no-ascii beats the environment");
+assert.equal(f.asciiMode(undefined, { LANG: "en_US.UTF-8", TERM: "xterm-256color" }), false, "a UTF-8 terminal keeps the glyphs");
+assert.equal(f.asciiMode(undefined, { LANG: "C", TERM: "xterm-256color" }), true, "LANG=C falls back to ascii");
+assert.equal(f.asciiMode(undefined, { LANG: "en_US.UTF-8", TERM: "linux" }), true, "the kernel console falls back");
+assert.equal(f.asciiMode(undefined, { LANG: "C", STRATA_ASCII: "0" }), false, "STRATA_ASCII=0 opts out of ascii");
+assert.equal(f.asciiMode(undefined, { LANG: "en_US.UTF-8", STRATA_ASCII: "1" }), true, "STRATA_ASCII=1 opts in");
+
 // Regression: switching to compact crashed on a generating server because
 // derive() returns speed as a number and pad() counts cells on a string.
 const busy = [{
@@ -239,5 +257,15 @@ assert.ok(gpuStrip.some((l) => l.includes("GPU") && l.includes("×2")), "compact
 const wide = render({ entries: gpuEntries, width: 200, height: 40, theme: "dark", color: false, tick: 0 });
 assert.ok(wide.some((l) => l.startsWith("╭") && f.width(l) === 200), "box spans the screen width");
 for (const line of wide) assert.ok(f.width(line) <= 200, "wide lines still fit");
+
+// The GPU rows are the glyph-densest path — the ×N badge, the – placeholders
+// for a slot with no fields, °C and the bars — so the ascii pass is checked
+// against them as well as against the single-GPU frame.
+for (const payload of [ok(multi), three, withPcie]) {
+  const frame = render({ entries: [{ server: servers[0], payload }], width: 100, height: 40, theme: "dark", color: false, ascii: true, tick: 0 });
+  assert.ok(frame.every((l) => !/[^\x00-\x7F]/.test(l)), "multi-GPU frame is fully ascii");
+}
+assert.ok(render({ entries: gpuEntries, width: 100, height: 40, theme: "dark", color: false, ascii: true, compact: true, tick: 0 })
+  .every((l) => !/[^\x00-\x7F]/.test(l)), "the ×N badge is ascii");
 
 console.log("derived metrics, sparkline and bar geometry, mascot frames, multi-GPU rows, and full/compact layout OK");

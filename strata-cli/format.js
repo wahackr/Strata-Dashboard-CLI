@@ -2,7 +2,6 @@
 // from renderer/renderer.js so the terminal and the widget say the same thing
 // about the same payload.
 const BLOCKS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
-const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 const PALETTES = {
   dark: {
@@ -161,12 +160,48 @@ function bar(frac, { cells = 20, fill = "█", empty = "░" } = {}) {
   return fill.repeat(n) + empty.repeat(cells - n);
 }
 
-function spinner(tick) {
-  return SPINNER[tick % SPINNER.length];
+/* ---- ASCII glyph fallback ---- */
+// Terminals without UTF-8 (LANG=C over ssh, PuTTY's raw transport, TERM=dumb,
+// the kernel console) render box-drawing and block glyphs as mojibake — the
+// "all black screen" report. Every substitution is exactly one cell wide, so
+// width()/truncate() math is identical before and after asciiize().
+const ASCII_GLYPHS = [
+  [/╭|╮|╰|╯/g, "+"], [/─/g, "-"], [/│/g, "|"], [/╱/g, "/"], [/╲/g, "\\"],
+  [/▸/g, ">"], [/●/g, "*"], [/·/g, "."], [/–/g, "-"], [/…/g, "~"],
+  [/°C/g, "C "], [/°/g, " "], [/×/g, "x"], [/↑/g, "^"], [/↓/g, "v"],
+  [/░/g, "."], [/▁/g, ","], [/▂/g, ":"], [/▃/g, "-"], [/▄/g, "="],
+  [/▅/g, "+"], [/▆/g, "*"], [/▇/g, "%"], [/█/g, "@"],
+  [/◕/g, "o"], [/◡/g, "u"], [/‿/g, "u"], [/✕/g, "x"], [/﹏/g, "v"],
+  [/✳|✷|✶|✴|✹/g, "*"],
+];
+
+function asciiize(s) {
+  for (const [re, c] of ASCII_GLYPHS) s = s.replace(re, c);
+  return s;
+}
+
+// True when the terminal should get plain ASCII. Explicit flags and
+// STRATA_ASCII win; otherwise locale and TERM decide: no UTF-8 locale means
+// UTF-8 bytes arrive as mojibake, and TERM=dumb/unknown or the kernel console
+// (TERM=linux, whose default cp437 font has no half-blocks) cannot draw them
+// either way.
+function asciiMode(flag, env = process.env) {
+  if (flag === true || flag === "ascii") return true;
+  if (flag === false || flag === "utf8") return false;
+  // An explicit STRATA_ASCII decides outright, in both directions: a locale
+  // that is simply unset (cron, a bare docker run) must not force ASCII on a
+  // terminal that renders UTF-8 just fine, and STRATA_ASCII=0 is how that user
+  // says so.
+  const envFlag = String(env.STRATA_ASCII ?? "");
+  if (envFlag !== "") return !/^(0|false|no|off)$/i.test(envFlag);
+  if (/dumb|unknown/i.test(String(env.TERM || "")) || /^linux$/i.test(String(env.TERM || ""))) return true;
+  const locale = env.LC_ALL || env.LC_CTYPE || env.LANG || "";
+  return !/utf-?8/i.test(locale);
 }
 
 module.exports = {
   PALETTES, STATE_ROLE, paint, bold, stripAnsi, width, truncate, center, pad,
   ANSI_BY_ROLE, COLOR_MODES, colorCapability, colorMode,
-  fmt, gb, kfmt, ctxfmt, time, spark, bar, spinner, BLOCKS, SPINNER,
+  fmt, gb, kfmt, ctxfmt, time, spark, bar, BLOCKS,
+  asciiize, asciiMode,
 };
