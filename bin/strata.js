@@ -21,9 +21,9 @@ Options
   --theme <dark|light> color theme (default: from config, else dark)
   --compact            one line per server, like the widget's compact strip
   --no-mascot          draw the panels without the animated blob
-  --color [mode]       auto|16|256|truecolor|never; force a palette depth
+  --color [mode]       auto|16|256|truecolor|console|never; force a palette depth
   --no-color           plain text, no ANSI
-  --ascii              ASCII glyphs (+, -, |, @) for terminals without UTF-8
+  --ascii              ASCII glyphs (+, -, |, [, ]) for terminals without UTF-8
   --no-ascii           force the Unicode set (--utf8 is the same flag)
   --once               poll each server once, print, and exit
   --json               with --once, print raw payloads instead of the panel
@@ -36,6 +36,10 @@ Color
   Auto paints 24-bit when COLORTERM says truecolor, 256-color names when TERM
   says 256color, and the 8 ANSI names otherwise, so the accent stays green on
   plain terminals (Alpine's tty, TERM=linux) instead of quantizing to yellow.
+  TERM=linux on its own selects the console palette even when a GUI terminal's
+  COLORTERM=truecolor is inherited: muted text goes light grey (37) and the
+  borders cyan (36), which the kernel vconsole can actually show, while status
+  keeps red/green/yellow. An explicit --color overrides the guess.
   Pipes are plain unless FORCE_COLOR is set; NO_COLOR turns color off.
 
 Glyphs
@@ -43,7 +47,9 @@ Glyphs
   same-width ASCII twin when the terminal cannot render UTF-8: no UTF-8 locale
   (LANG=C over ssh), TERM=dumb/unknown/linux, or STRATA_ASCII=1. --ascii and
   STRATA_ASCII=0 decide outright. Substitution keeps one glyph per cell, so the
-  box still lines up.
+  box still lines up. Gauges become bracketed [######----] instead of an @ run
+  that buried the fill, and sparklines use the seven-step scale  .-+=*# where
+  a blank cell means no traffic rather than a dot representing nothing.
 
 Config file (JSON)
   {
