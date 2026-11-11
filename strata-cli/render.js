@@ -5,13 +5,14 @@ const f = require("./format.js");
 const mascot = require("./mascot.js");
 const { derive } = require("./derive.js");
 
-const PANEL_ROWS = 15; // lines per expanded server panel, borders included
-// A multi-GPU panel trades the four GPU cards for two card rows plus one row
-// per GPU: 13 + N. Two GPUs land back at 15, so the screen-fit math below has
-// to sum per-entry heights instead of trusting PANEL_ROWS.
-function panelRows(payload) {
+const STATUS_ROWS = 5;
+const PANEL_ROWS = 10 + mascot.H; // single-GPU panel, borders included
+// Multi-GPU panels replace four metric rows with two rows plus one per GPU.
+// Without the mascot, only the five status rows need space.
+function panelRows(payload, mascotOn = true) {
   const n = derive(payload).gpus.length;
-  return n > 0 ? 13 + n : PANEL_ROWS;
+  const statusRows = mascotOn ? mascot.H : STATUS_ROWS;
+  return statusRows + (n > 0 ? 8 + n : 10);
 }
 
 // GPU names arrive as marketing strings ("NVIDIA GeForce RTX 4070"); the row
@@ -94,18 +95,18 @@ function panel(entry, { iw, pal, color, tick, mascotOn, ascii }) {
   const art = mascotOn ? mascot.frame(d.state, tick, ascii) : null;
   const side = [
     `${f.paint(f.pad(server.id, 8), pal.muted, color)} ${tag}`,
-    `  ${f.bold(f.truncate(d.label, iw - 20), color)}`,
-    `  ${f.paint(f.truncate(d.detail, iw - 20), pal.muted, color)}`,
-    `  ${f.paint(f.bar(d.pct / 100, { cells: Math.max(8, iw - 22), ascii }), d.pct > 80 ? pal.good : pal.accent, color)}`,
+    `  ${f.bold(f.truncate(d.label, iw - mascot.W - 7), color)}`,
+    `  ${f.paint(f.truncate(d.detail, iw - mascot.W - 7), pal.muted, color)}`,
+    `  ${f.paint(f.bar(d.pct / 100, { cells: Math.max(8, iw - mascot.W - 7), ascii }), d.pct > 80 ? pal.good : pal.accent, color)}`,
     `  ${f.paint(`refresh ${f.pad(String(Math.round(server.refreshMs / 100) / 10), 4)}s · key ${server.keySource}`, pal.muted, color)}`,
   ];
   const inner = iw - mascot.W - 5; // the cell beside the art, borders excluded
-  for (let i = 0; i < mascot.H; i++) {
+  for (let i = 0; i < (mascotOn ? mascot.H : STATUS_ROWS); i++) {
     const head = mascotOn ? f.paint(art[i], pal[f.STATE_ROLE[d.state] || "muted"], color) : " ".repeat(mascot.W);
     // pad after truncate, so the right border lands on the same column as every
     // other row no matter how short this line's text is.
     lines.push(f.paint("│ ", pal.border, color)
-      + `${head} ${f.pad(f.truncate(side[i], inner), inner)}`
+      + `${head} ${f.pad(f.truncate(side[i] ?? "", inner), inner)}`
       + f.paint(" │", pal.border, color));
   }
 
@@ -226,10 +227,10 @@ function render(options) {
   lines.push(header({ entries, theme, color, pal, tick, iw, configSource: options.configSource || "defaults", refreshMs: options.refreshMs || 1000 }));
 
   // Compact per server whenever the expanded panels would not fit the screen.
-  const wanted = entries.reduce((h, e) => h + panelRows(e.payload), 0) + 2;
+  const wanted = entries.reduce((h, e) => h + panelRows(e.payload, mascotOn), 0) + 2 + (options.warnings || []).length;
   const compactAll = options.compact || wanted > height;
   for (const entry of entries) {
-    if (compactAll && !(entries.length === 1 && !options.compact)) lines.push(stripLine(entry, { iw, pal, color, tick, mascotOn, ascii }));
+    if (compactAll) lines.push(stripLine(entry, { iw, pal, color, tick, mascotOn, ascii }));
     else lines.push(...panel(entry, { iw, pal, color, tick, mascotOn, ascii }));
   }
 
