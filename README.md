@@ -220,6 +220,23 @@ and status keeps its recognizable red/green/yellow (`91/92/93`). Borders are
 painted in the border color everywhere, rather than inheriting whatever color
 the row happened to use.
 
+Percentage gauges — request progress, per-GPU util, context, RAM — are painted
+band by band rather than in one hue picked from the value. Each cell takes the
+color of its own place on the 0-100% scale: green to 50%, yellow to 70%, orange
+to 90%, red past that, with each boundary counted as the cooler band. A full bar
+therefore runs green → yellow → orange → red, and a 30% bar is green end to end:
+the bands say how far along the capacity is, which one color per bar cannot
+show. The fill rounds to whole cells, so the last cell of a bar can land just
+past the reading it stands for; it is cooled to that reading's own band, so a bar
+at 90% shows no red at any width and nothing goes a band hot before it gets
+there. The unfilled track stays muted, so the colored part is the reading. A
+16-color terminal has no orange, so the band borrows a neighbour that still
+reads hotter than the step below it — ordinary yellow under `warn`'s bright
+yellow in the dark theme (`92/93/33/91`), bright red between the light theme's
+amber and dark red (`32/33/91/31`) — and a 256-color terminal gets a real orange
+(`208` dark, `130` light). The bands survive the ASCII gauge: `[######----]` is
+still painted in four colors.
+
 ### Glyphs and ASCII fallback
 
 The bunny uses ASCII in every terminal. The box drawing and block sparklines

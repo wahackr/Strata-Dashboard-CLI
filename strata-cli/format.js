@@ -9,14 +9,17 @@ const BLOCKS = ["▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"];
 // step, always ASCII, so it survives a framebuffer with no block glyphs.
 const ASCII_SPARK = [" ", ".", "-", "=", "+", "*", "#"];
 
+// `hot` is the fourth heat step — the orange between warn and bad that the
+// gauge ramp needs (see BAR_BANDS). It is a role, not a literal, so the ramp
+// follows the theme and every color-depth fallback like the rest of the UI.
 const PALETTES = {
   dark: {
     text: "#f2f5ec", muted: "#92998c", accent: "#b8f36b", good: "#b8f36b",
-    warn: "#ffbf69", bad: "#ff716d", border: "#394034", card: "#1e221c",
+    warn: "#ffbf69", hot: "#ff8a3d", bad: "#ff716d", border: "#394034", card: "#1e221c",
   },
   light: {
     text: "#171d13", muted: "#656d5b", accent: "#3f7d16", good: "#3f7d16",
-    warn: "#a86a10", bad: "#c0403b", border: "#c9d3ba", card: "#ffffff",
+    warn: "#a86a10", hot: "#c8500f", bad: "#c0403b", border: "#c9d3ba", card: "#ffffff",
   },
 };
 
@@ -34,16 +37,23 @@ const STATE_ROLE = {
 // the light theme is untouched. Only the low-contrast roles need a bump: 90 is
 // bright-black, which on a black console is barely legible.
 const ANSI_BY_ROLE = {
+  // The gauge ramp needs four distinct heat steps, and the 16-color set has no
+  // orange: in the dark theme the orange band takes the ordinary yellow (33),
+  // one step under warn's bright yellow (93), so 92/93/33/91 stays four colors
+  // in ramp order. The light theme keeps its dark foregrounds legible on white
+  // and borrows bright red (91) for the orange band, under bad's dark red (31).
+  // At 256 colors orange is a real color (208 / 130), and the kernel console
+  // answers to 33, which reads amber on black.
   dark: {
     text: { ansi: 97, x256: 15 }, muted: { ansi: 90, x256: 8, console: 37 },
     accent: { ansi: 92, x256: 10 }, good: { ansi: 92, x256: 10 },
-    warn: { ansi: 93, x256: 11 }, bad: { ansi: 91, x256: 9 },
+    warn: { ansi: 93, x256: 11 }, hot: { ansi: 33, x256: 208 }, bad: { ansi: 91, x256: 9 },
     border: { ansi: 90, x256: 8, console: 36 }, card: { ansi: 97, x256: 15 },
   },
   light: {
     text: { ansi: 30, x256: 0 }, muted: { ansi: 90, x256: 7 },
     accent: { ansi: 32, x256: 2 }, good: { ansi: 32, x256: 2 },
-    warn: { ansi: 33, x256: 3 }, bad: { ansi: 31, x256: 1 },
+    warn: { ansi: 33, x256: 3 }, hot: { ansi: 91, x256: 130 }, bad: { ansi: 31, x256: 1 },
     border: { ansi: 90, x256: 7 }, card: { ansi: 30, x256: 15 },
   },
 };
@@ -196,6 +206,74 @@ function bar(frac, { cells = 20, fill = "█", empty = "░", ascii = false } = 
   return fill.repeat(n) + empty.repeat(cells - n);
 }
 
+// The gauge ramp, as fractions of the full 0-100% scale. Each boundary belongs
+// to the lower band: half full is green, 70% yellow, 90% orange, and only past
+// 90% red. `role` names a palette entry, so the ramp follows the theme and the
+// color-depth fallbacks rather than hard-coding four colors.
+const BAR_BANDS = [
+  { to: 0.5, role: "good" },
+  { to: 0.7, role: "warn" },
+  { to: 0.9, role: "hot" },
+  { to: 1, role: "bad" },
+];
+
+// Which band a fraction lands in. The epsilon is for binary fractions: a cell
+// edge that should sit exactly on 0.5 arrives as 0.5000000000000001 at some
+// widths, and would otherwise paint one cell a band too hot.
+function barBand(frac) {
+  const f = Math.min(1, Math.max(0, Number.isFinite(frac) ? frac : 0));
+  for (const band of BAR_BANDS) if (f <= band.to + 1e-9) return band.role;
+  return BAR_BANDS[BAR_BANDS.length - 1].role;
+}
+
+// Band order, for comparing two bands' heat. Roles rather than indexes, so the
+// palette stays the only place colors are named.
+const BAND_RANK = BAR_BANDS.reduce((m, b, i) => (m[b.role] = i, m), {});
+
+// The cooler of two bands. Never hotter, which is the point: see rampBar.
+function coolerBand(a, b) {
+  return BAND_RANK[a] <= BAND_RANK[b] ? a : b;
+}
+
+// The same gauge bar() draws, painted band by band. A cell's color follows its
+// position on the 0-100% scale, never the filled length, so a full bar runs
+// green -> yellow -> orange -> red and a 30% bar is green end to end: the bands
+// describe how far along the capacity is, which is the whole point of the ramp.
+// One paint per band run, and paint() adds no cells, so width(), truncate() and
+// the panel borders are untouched. The unfilled track stays muted, so the
+// colored part reads as the reading.
+function rampBar(frac, { cells = 20, pal = PALETTES.dark, color, fill = "█", empty = "░", ascii = false } = {}) {
+  const f = Math.min(1, Math.max(0, Number.isFinite(frac) ? frac : 0));
+  // The bracketed ascii gauge spends two of its cells on the ends, so the bands
+  // are measured on the inner run — the same scale bar() rounds the fill on.
+  const bracketed = ascii && cells >= 3;
+  const scale = bracketed ? cells - 2 : cells;
+  const filled = Math.round(f * scale);
+  const on = ascii ? "#" : fill;
+  const off = ascii ? "-" : empty;
+  const run = (text, role) => paint(text, pal[role], color);
+  const out = bracketed ? [run("[", "muted")] : [];
+  const roles = [];
+  for (let i = 0; i < filled; i++) roles.push(barBand((i + 1) / scale));
+  // The fill rounds to whole cells, so at widths where a band edge lands between
+  // cells the last cell drawn sits a hair past the reading: 90% of a 24-cell bar
+  // draws 22 cells, and the 22nd edge is at 91.7%, which would put a red tip on a
+  // bar that has not gone past 90%. Cool the tip down to the reading's own band;
+  // the tip can read cooler than its cell position, never hotter, so nothing that
+  // is not actually in a hotter band starts looking like one.
+  if (filled > 0) roles[filled - 1] = coolerBand(roles[filled - 1], barBand(f));
+  for (let i = 0; i < filled;) {
+    const role = roles[i];
+    let n = 1;
+    while (i + n < filled && roles[i + n] === role) n++;
+    out.push(run(on.repeat(n), role));
+    i += n;
+  }
+  if (filled < scale) out.push(run(off.repeat(scale - filled), "muted"));
+  if (bracketed) out.push(run("]", "muted"));
+  return out.join("");
+}
+
 /* ---- ASCII glyph fallback ---- */
 // Terminals without UTF-8 (LANG=C over ssh, PuTTY's raw transport, TERM=dumb,
 // the kernel console) render box-drawing and block glyphs as mojibake — the
@@ -238,6 +316,6 @@ function asciiMode(flag, env = process.env) {
 module.exports = {
   PALETTES, STATE_ROLE, paint, bold, stripAnsi, width, truncate, center, pad,
   ANSI_BY_ROLE, COLOR_MODES, colorCapability, colorMode,
-  fmt, gb, kfmt, ctxfmt, time, spark, bar, BLOCKS, ASCII_SPARK,
+  fmt, gb, kfmt, ctxfmt, time, spark, bar, rampBar, barBand, BAR_BANDS, BLOCKS, ASCII_SPARK,
   asciiize, asciiMode,
 };
