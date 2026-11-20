@@ -161,6 +161,79 @@ for (const [role, hex] of Object.entries(f.PALETTES.dark)) {
   assert.match(f.paint("x", hex, "console"), /^\x1b\[(3[0-7]|9[0-7])m/, `dark.${role} has a plain console foreground`);
 }
 
+// ---- graded gauges ----
+// A cell's color follows its position on the 0-100% scale, never the filled
+// length: a 30% bar is green end to end and a 100% bar runs green -> yellow ->
+// orange -> red. Geometry must stay identical to bar(), or the panel borders
+// stop lining up, so every ramp assertion is paired with a cell-count check.
+const ramp = (frac, cells = 20, opts = {}) => f.rampBar(frac, { cells, pal: f.PALETTES.dark, color: "16", ...opts });
+// Foreground colors only, in the order they are painted: bold (1/22) and the
+// 39 reset are not ink, and 90 (muted) is the unfilled track rather than heat.
+const ink = (s) => (s.match(/\x1b\[(3[0-7]|9[0-7])m/g) || []).map((c) => Number(c.slice(2, -1)));
+const heat = (s) => ink(s).filter((c) => c !== 90);
+for (const cells of [4, 7, 10, 20, 30]) {
+  for (const frac of [0, 0.25, 0.3, 0.5, 0.55, 0.7, 0.75, 0.9, 0.95, 1, 1.5, NaN]) {
+    assert.equal(f.width(ramp(frac, cells)), cells, `ramp keeps ${cells} cells at ${frac}`);
+    assert.equal(f.stripAnsi(ramp(frac, cells)), f.bar(frac, { cells }), `ramp cells match the plain gauge at ${cells}/${frac}`);
+    assert.equal(f.stripAnsi(ramp(frac, cells, { ascii: true })), f.bar(frac, { cells, ascii: true }),
+      `ascii ramp cells match the plain gauge at ${cells}/${frac}`);
+  }
+}
+// Band edges belong to the lower band: half full is still green, 90% is orange
+// but not red, and only a bar that reaches past 90% shows red at its right end.
+assert.deepEqual(heat(ramp(0)), [], "an empty gauge is all track");
+assert.deepEqual(heat(ramp(0.3)), [92], "30% is green end to end");
+assert.deepEqual(heat(ramp(0.5)), [92], "half full is still all green");
+assert.deepEqual(heat(ramp(0.7)), [92, 93], "70% adds yellow and stops there");
+assert.deepEqual(heat(ramp(0.9)), [92, 93, 33], "90% adds orange, not red");
+assert.deepEqual(heat(ramp(1)), [92, 93, 33, 91], "a full bar shows all four bands, hottest at the right");
+// At a width that does not divide the bands evenly, the fill rounds to whole
+// cells and the last one drawn sits a hair past the reading: 90% of a 24-cell bar
+// draws 22 cells, whose right edge is 91.7%. The tip is cooled to the reading's
+// own band, so a bar that has not crossed a boundary never shows the next band.
+assert.deepEqual(heat(ramp(0.5, 7)), [92], "half of a 7-cell bar stays green");
+assert.deepEqual(heat(ramp(0.7, 24)), [92, 93], "70% stays yellow where the edge falls between cells");
+assert.deepEqual(heat(ramp(0.9, 24)), [92, 93, 33], "90% stays orange there, too");
+assert.deepEqual(heat(ramp(0.96, 24)), [92, 93, 33, 91], "and past the boundary the next band does appear");
+// The same rule as an invariant, over the widths the panel actually produces: no
+// cell reads hotter than the value it stands for. RAMP16 is the dark theme's
+// ramp in 16-color order, so its index is the heat rank of a foreground.
+const RAMP16 = [92, 93, 33, 91];
+const rank = (codes) => Math.max(-1, ...codes.map((c) => RAMP16.indexOf(c)));
+for (const cells of [4, 6, 7, 9, 10, 11, 13, 17, 20, 22, 24, 26, 30, 55]) {
+  for (const frac of [0.1, 0.25, 0.5, 0.51, 0.7, 0.71, 0.9, 0.91, 0.95, 0.99, 1]) {
+    const painted = rank(heat(ramp(frac, cells)));
+    const allowed = RAMP16.indexOf(f.ANSI_BY_ROLE.dark[f.barBand(frac)].ansi);
+    assert.ok(painted <= allowed,
+      `the ${Math.round(frac * 100)}% bar at ${cells} cells never reads hotter than its reading`);
+  }
+}
+// On a 20-cell gauge every band edge lands on a cell, so the run lengths are the
+// bands themselves: 0-50 green, 51-70 yellow, 71-90 orange, 91-100 red.
+assert.deepEqual(ramp(1).split(/\x1b\[[0-9;]*m/).filter(Boolean),
+  ["█".repeat(10), "█".repeat(4), "█".repeat(4), "█".repeat(2)], "band widths follow the scale");
+assert.ok(ink(ramp(0.3)).includes(90), "the unfilled track is painted muted");
+// The 16-color set has no orange, so each theme borrows a neighbour that still
+// reads hotter than the step below: four heat steps stay four distinct
+// foregrounds at every depth, in ramp order.
+for (const theme of ["dark", "light"]) {
+  const roles = ["good", "warn", "hot", "bad"].map((r) => f.PALETTES[theme][r]);
+  for (const mode of ["16", "256", "truecolor", "console"]) {
+    assert.equal(new Set(roles.map((hex) => f.paint("x", hex, mode))).size, 4,
+      `${theme} keeps four distinct heat steps at ${mode} colors`);
+  }
+}
+// The ascii twin keeps the bracketed gauge, stays pure ASCII, and bands on the
+// same scale — the fill is measured on the inner run, where the brackets are not.
+assert.match(f.stripAnsi(ramp(0.6, 20, { ascii: true })), /^\[#+-*\]$/, "the ascii gauge keeps its brackets and hashes");
+assert.deepEqual(heat(ramp(0.6, 20, { ascii: true })), [92, 93], "the ascii gauge bands on the same scale");
+assert.ok(!/[^\x00-\x7F]/.test(f.stripAnsi(ramp(1, 20, { ascii: true }))), "the ascii ramp is pure ascii");
+// Below 3 ascii cells bar() rounds a partial fill up to a full one; the ramp
+// keeps an honest split there instead. No gauge in the panel is that narrow (the
+// narrowest is 4 cells), and the width is what the layout depends on.
+assert.equal(f.width(ramp(0.5, 2, { ascii: true })), 2, "the bracket-less ascii gauge keeps its width");
+assert.equal(f.stripAnsi(ramp(0.5, 2, { ascii: true })), "#-", "and it splits honestly at half");
+
 // ---- mascot frames never change size ----
 for (const state of mascot.stateList()) {
   for (const tick of Array.from({ length: 32 }, (_, i) => i)) {
@@ -408,4 +481,46 @@ for (const payload of [ok(multi), three, withPcie]) {
 assert.ok(render({ entries: gpuEntries, width: 100, height: 40, theme: "dark", color: false, ascii: true, compact: true, tick: 0 })
   .every((l) => !/[^\x00-\x7F]/.test(l)), "the ×N badge is ascii");
 
-console.log("derived metrics, sparkline and gauge geometry, mascot frames, multi-GPU rows, ascii fallback, console palette, and full/compact layout OK");
+// ---- graded gauges inside a frame ----
+// The ramp is a scale, not a value color: a cool server's bars stay green and a
+// pegged one reaches red only at its right end. Checked through render() as
+// well, because the panel recomputes every gauge's cell count per width and per
+// row, and the bands have to follow the scale at all of them.
+const cool = ok({ live: { state: "generating", prompt_tokens: 26214, generated: 0, max_tokens: 0 },
+  engine: { max_context: 131072 }, hardware: { gpu_util: 20, ram_used: 8e9, ram_total: 31e9 }, history: {}, requests: [] });
+const coolFrame = render({ entries: [{ server: servers[0], payload: cool }],
+  width: 100, height: 40, theme: "dark", color: "16", mascot: false, tick: 0 });
+// Anchored on a word boundary and on the plain text: "RAM" alone also matches the
+// VRAM card, whose sparklines are accent-painted and would read as ramp color.
+const gaugeRow = (frame, label) => frame.find((l) => new RegExp(`(^|\\s)${label}\\s`).test(f.stripAnsi(l)));
+assert.deepEqual(heat(gaugeRow(coolFrame, "Ctx")), [92], "a quarter-full context bar stays green");
+assert.deepEqual(heat(gaugeRow(coolFrame, "RAM")), [92], "a quarter-used RAM bar stays green");
+
+const hot = ok({ live: { state: "generating", prompt_tokens: 130200, generated: 200, max_tokens: 200, tok_s: 40 },
+  engine: { max_context: 131072 }, hardware: { gpu_util: 100, ram_used: 31e9, ram_total: 31e9 }, history: {}, requests: [] });
+const hotFrame = render({ entries: [{ server: servers[0], payload: hot }],
+  width: 100, height: 40, theme: "dark", color: "16", mascot: false, tick: 0 });
+assert.deepEqual(heat(gaugeRow(hotFrame, "Ctx")), [92, 93, 33, 91], "a nearly full context bar runs through the ramp");
+assert.deepEqual(heat(gaugeRow(hotFrame, "RAM")), [92, 93, 33, 91], "a full RAM bar runs through the ramp");
+
+const pegged = ok({ ...multi, hardware: { ...multi.hardware, gpus: multi.hardware.gpus.map((g) => ({ ...g, util: 100 })) } });
+const peggedFrame = render({ entries: [{ server: servers[0], payload: pegged }],
+  width: 100, height: 40, theme: "dark", color: "16", tick: 0 });
+const gpuLine = peggedFrame.find((l) => l.includes("GPU 0") && l.includes("Tesla P40"));
+assert.ok(gpuLine, "the pegged GPU row is drawn");
+assert.deepEqual(heat(gpuLine), [92, 93, 33, 91], "a pegged GPU util bar shows all four bands, red at the right");
+assert.ok(peggedFrame.every((l) => f.width(l) <= 100), "the ramped util bar never pushes the value tail out");
+// The same frame at 256 colors: orange is a color there (208), and the ramp must
+// still write indexed foregrounds rather than bare palette indices.
+const pegged256 = render({ entries: [{ server: servers[0], payload: pegged }],
+  width: 100, height: 40, theme: "dark", color: "256", tick: 0 });
+assert.ok(pegged256.some((l) => l.includes("\x1b[38;5;208m")), "the orange band is a real color at 256 colors");
+assert.ok(pegged256.every((l) => !/\x1b\[(8|10|11|15)m/.test(l)), "the ramp never emits a bare palette index");
+// Glyph fallback keeps the bands: the ascii twin of a hot frame is still pure
+// ascii, still the same shape, and still painted band by band.
+const hotAscii = render({ entries: [{ server: servers[0], payload: hot }],
+  width: 100, height: 40, theme: "dark", color: "16", ascii: true, mascot: false, tick: 0 });
+assert.ok(hotAscii.every((l) => !/[^\x00-\x7F]/.test(f.stripAnsi(l))), "a ramped ascii frame is pure ascii");
+assert.deepEqual(heat(gaugeRow(hotAscii, "Ctx")), [92, 93, 33, 91], "the ascii gauge keeps its bands");
+
+console.log("derived metrics, sparkline and gauge geometry, graded gauge bands, mascot frames, multi-GPU rows, ascii fallback, console palette, and full/compact layout OK");

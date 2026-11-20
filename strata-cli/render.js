@@ -97,7 +97,7 @@ function panel(entry, { iw, pal, color, tick, mascotOn, ascii }) {
     `${f.paint(f.pad(server.id, 8), pal.muted, color)} ${tag}`,
     `  ${f.bold(f.truncate(d.label, iw - mascot.W - 7), color)}`,
     `  ${f.paint(f.truncate(d.detail, iw - mascot.W - 7), pal.muted, color)}`,
-    `  ${f.paint(f.bar(d.pct / 100, { cells: Math.max(8, iw - mascot.W - 7), ascii }), d.pct > 80 ? pal.good : pal.accent, color)}`,
+    `  ${f.rampBar(d.pct / 100, { cells: Math.max(8, iw - mascot.W - 7), ascii, pal, color })}`,
     `  ${f.paint(`refresh ${f.pad(String(Math.round(server.refreshMs / 100) / 10), 4)}s · key ${server.keySource}`, pal.muted, color)}`,
   ];
   const inner = iw - mascot.W - 5; // the cell beside the art, borders excluded
@@ -141,7 +141,7 @@ function panel(entry, { iw, pal, color, tick, mascotOn, ascii }) {
     for (const p of parts) {
       lines.push(row(`  ${f.paint(`GPU ${p.g.index}`, pal.muted, color)}  `
         + `${f.pad(f.truncate(shortGpuName(p.g.name), nameW), nameW)}  `
-        + f.paint(f.bar(p.g.util == null ? 0 : p.g.util / 100, { cells: barW, ascii }), pal.accent, color)
+        + f.rampBar(p.g.util == null ? 0 : p.g.util / 100, { cells: barW, ascii, pal, color })
         + `  ${f.bold(p.util, color)} · ${p.vram} · ${p.temp} · ${p.power}${p.pcie}`, iw, pal, color));
     }
     lines.push(metricRow(cpuCell, diskCell, iw, pal, color));
@@ -165,7 +165,7 @@ function panel(entry, { iw, pal, color, tick, mascotOn, ascii }) {
   // used to be a fixed 22 on top of a greedy bar, which overflowed and got
   // silently cut by row() at every width.
   const ctxTail = Math.min(22, Math.max(10, iw - 34));
-  const ctxBar = f.paint(f.bar(d.ctxFrac, { cells: Math.max(4, iw - 19 - ctxTail), ascii }), d.ctxFrac > 0.9 ? pal.bad : pal.good, color);
+  const ctxBar = f.rampBar(d.ctxFrac, { cells: Math.max(4, iw - 19 - ctxTail), ascii, pal, color });
   lines.push(row(`  Ctx  ${f.bold(f.pad(ctxPct, 4), color)} ${ctxBar}  ${f.truncate(`${f.kfmt(d.ctxUsed)} / ${f.ctxfmt(d.ctxMax)}`, ctxTail)}`, iw, pal, color));
 
   // "  Cache " (8) + cache + two spaces + "RAM " (4) + ram + space + bar = iw-4.
@@ -174,7 +174,7 @@ function panel(entry, { iw, pal, color, tick, mascotOn, ascii }) {
   const cacheW = Math.min(26, Math.max(6, budget - 16 - ramBar));
   const ramW = Math.min(16, Math.max(6, budget - cacheW - ramBar));
   lines.push(row(`  ${f.paint("Cache", pal.muted, color)} ${f.pad(f.truncate(d.cache, cacheW), cacheW)}  `
-    + `${f.paint("RAM", pal.muted, color)} ${f.pad(f.truncate(d.ram, ramW), ramW)} ${f.paint(f.bar(d.ramFrac, { cells: ramBar, ascii }), d.ramFrac > 0.92 ? pal.bad : pal.accent, color)}`, iw, pal, color));
+    + `${f.paint("RAM", pal.muted, color)} ${f.pad(f.truncate(d.ram, ramW), ramW)} ${f.rampBar(d.ramFrac, { cells: ramBar, ascii, pal, color })}`, iw, pal, color));
 
   lines.push(row(`  ${f.paint("Last ", pal.muted, color)}${f.truncate(d.lastRequest || "no requests yet", iw - 11)}`, iw, pal, color));
   lines.push(bottom(iw, pal, color));
